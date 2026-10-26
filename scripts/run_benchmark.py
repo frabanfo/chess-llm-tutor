@@ -43,6 +43,9 @@ def main() -> None:
     parser.add_argument("--judge-depth", type=int, default=16)
     parser.add_argument("--out", default="results/benchmark.csv")
     parser.add_argument("--cache", default="results/llm_cache.jsonl")
+    parser.add_argument("--resume", action="store_true",
+                        help="riprende un run interrotto: salta le righe già in --out "
+                             "e ritenta solo le chiamate fallite")
     parser.add_argument("--dry-run", action="store_true",
                         help="salta l'LLM, usa solo le baseline")
     args = parser.parse_args()
@@ -75,7 +78,8 @@ def main() -> None:
                                          name=f"{args.model}:{rep}"))
 
         print(f"Risolutori: {', '.join(s.name for s in solvers)}")
-        run_benchmark(puzzles, solvers, engine, args.out, judge_depth=args.judge_depth)
+        run_benchmark(puzzles, solvers, engine, args.out,
+                      judge_depth=args.judge_depth, resume=args.resume)
 
     print(f"\nRisultati in {args.out}")
     print_report(load_results(args.out))

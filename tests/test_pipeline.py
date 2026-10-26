@@ -297,3 +297,34 @@ def test_benchmark_end_to_end(puzzles, engine, tmp_path):
     # Stockfish a depth 14 deve risolvere quasi tutti i puzzle di questo campione.
     assert sum(r.exact_match or r.engine_equivalent for r in results) >= 2
     assert out.exists()
+
+
+def test_benchmark_resume_skips_done_and_retries_errors(puzzles, engine, tmp_path):
+    """La ripresa salta le coppie già fatte e ritenta solo le chiamate fallite."""
+    import pandas as pd
+    from chesstutor.benchmark import run_benchmark
+    from chesstutor.solvers import Answer, Solver
+
+    class Flaky(Solver):
+        name = "flaky"
+
+        def __init__(self, fail):
+            self.fail, self.calls = fail, 0
+
+        def solve(self, board):
+            self.calls += 1
+            if self.fail:
+                return Answer(move=None, error="RateLimitError")
+            return Answer(move=next(iter(board.legal_moves)))
+
+    out = tmp_path / "r.csv"
+    run_benchmark(puzzles[:2], [Flaky(fail=True)], engine, out, judge_depth=8, verbose=False)
+    first = Flaky(fail=False)
+    run_benchmark(puzzles[:3], [first], engine, out, judge_depth=8, verbose=False, resume=True)
+    assert first.calls == 3                      # 2 errori ritentati + 1 nuovo
+
+    again = Flaky(fail=False)
+    run_benchmark(puzzles[:3], [again], engine, out, judge_depth=8, verbose=False, resume=True)
+    assert again.calls == 0                      # tutto già fatto
+    df = pd.read_csv(out, keep_default_na=False)
+    assert len(df) == 3 and (df["error"] == "").all()

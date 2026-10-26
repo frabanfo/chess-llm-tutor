@@ -10,7 +10,7 @@ from __future__ import annotations
 import csv
 import re
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 import chess
@@ -164,6 +164,27 @@ def run_puzzle(puzzle: Puzzle, solver: Solver, engine: Engine, judge_depth: int 
     )
 
 
+RESULT_COLUMNS = [f.name for f in fields(Result)]
+
+
+def _completed_rows(out_path: Path) -> list[dict]:
+    """Righe già valide di un run precedente, per riprenderlo.
+
+    Le righe con `error` vengono scartate, così la ripresa ritenta le chiamate
+    fallite invece di lasciarle nel CSV accanto a quelle nuove.
+    """
+    if not out_path.exists():
+        return []
+    with open(out_path, newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        if reader.fieldnames != RESULT_COLUMNS:
+            raise ValueError(
+                f"{out_path} ha colonne diverse da quelle attuali: non si può "
+                "riprendere, rilancia senza --resume o cambia --out."
+            )
+        return [row for row in reader if not row["error"]]
+
+
 def run_benchmark(
     puzzles: list[Puzzle],
     solvers: list[Solver],
@@ -171,31 +192,37 @@ def run_benchmark(
     out_path: str | Path,
     judge_depth: int = 16,
     verbose: bool = True,
+    resume: bool = False,
 ) -> list[Result]:
     """Esegue tutti i risolutori su tutti i puzzle e scrive un CSV.
 
     Il CSV viene scritto incrementalmente: un run lungo che si interrompe a
-    metà lascia comunque i dati già raccolti.
+    metà lascia comunque i dati già raccolti. Con `resume=True` le coppie
+    (puzzle, risolutore) già presenti vengono saltate; restituisce solo i
+    risultati calcolati in questa chiamata.
     """
     results: list[Result] = []
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    kept = _completed_rows(out_path) if resume else []
+    done_keys = {(row["puzzle_id"], row["solver"]) for row in kept}
+
     with open(out_path, "w", newline="", encoding="utf-8") as fh:
-        writer = None
-        total = len(puzzles) * len(solvers)
-        done = 0
-        for puzzle in puzzles:
-            for solver in solvers:
-                result = run_puzzle(puzzle, solver, engine, judge_depth)
-                results.append(result)
-                row = asdict(result)
-                if writer is None:
-                    writer = csv.DictWriter(fh, fieldnames=list(row))
-                    writer.writeheader()
-                writer.writerow(row)
-                fh.flush()
-                done += 1
-                if verbose and done % 25 == 0:
-                    print(f"  {done}/{total}...", flush=True)
+        writer = csv.DictWriter(fh, fieldnames=RESULT_COLUMNS)
+        writer.writeheader()
+        writer.writerows(kept)
+        fh.flush()
+
+        todo = [(p, s) for p in puzzles for s in solvers
+                if (p.puzzle_id, s.name) not in done_keys]
+        if verbose and kept:
+            print(f"  ripresa: {len(kept)} righe già fatte, {len(todo)} da fare", flush=True)
+        for done, (puzzle, solver) in enumerate(todo, 1):
+            result = run_puzzle(puzzle, solver, engine, judge_depth)
+            results.append(result)
+            writer.writerow(asdict(result))
+            fh.flush()
+            if verbose and done % 25 == 0:
+                print(f"  {done}/{len(todo)}...", flush=True)
     return results
