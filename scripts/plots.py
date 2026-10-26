@@ -77,11 +77,18 @@ def solver_order(solvers) -> list[str]:
     return base + llm
 
 
+def highlighted(order: list[str]) -> set[str]:
+    """Le serie in evidenza: gli LLM; senza LLM, greedy (il metro di RQ2)."""
+    llm = {s for s in order if is_llm(s)}
+    return llm or ({"greedy"} & set(order))
+
+
 def solver_colors(order: list[str]) -> dict[str, str]:
-    """Grigi per le baseline, palette categoriale per gli LLM (in ordine fisso)."""
+    """Grigi per le baseline, palette categoriale per le serie in evidenza (in ordine fisso)."""
     colors, grays, llm_i = {}, iter(BASELINE_GRAYS * 3), 0
+    focus = highlighted(order)
     for s in order:
-        if is_llm(s):
+        if s in focus:
             colors[s] = SERIES[llm_i % len(SERIES)]
             llm_i += 1
         else:
@@ -139,11 +146,12 @@ def plot_by_rating(df, order, colors, label, out: Path) -> Path:
     x = {b: i for i, b in enumerate(buckets)}
     fig, ax = plt.subplots(figsize=(9, 5.2))
     ends = []
+    focus = highlighted(order)
     for solver in order:
         rows = s[s["solver"] == solver].copy()
         rows["x"] = rows["rating_bucket"].map(x)
         rows = rows.sort_values("x")
-        llm = is_llm(solver)
+        llm = solver in focus
         ax.plot(rows["x"], rows["solved_rate"], color=colors[solver],
                 lw=2, ls="-" if llm else "--", marker="o", ms=5 if llm else 3,
                 label=label(solver), zorder=3 if llm else 2)
@@ -217,8 +225,8 @@ def plot_theme_heatmap(df, order, label, out: Path) -> Path:
     s = summary(df, ["theme", "solver"])
     rate = s.pivot(index="theme", columns="solver", values="solved_rate")[order]
     n = s.pivot(index="theme", columns="solver", values="n")[order]
-    # Temi ordinati dal più difficile per il primo LLM (o per la media).
-    key = next((c for c in order if is_llm(c)), None)
+    # Temi ordinati dal più difficile per la prima serie in evidenza (o per la media).
+    key = next((c for c in order if c in highlighted(order)), None)
     rate = rate.loc[(rate[key] if key else rate.mean(axis=1)).sort_values().index]
     n = n.loc[rate.index]
 
