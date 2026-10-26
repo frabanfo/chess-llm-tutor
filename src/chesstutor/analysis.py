@@ -116,7 +116,10 @@ def analyse_game(
             continue
 
         judgement = engine.judge(board, move, depth=depth)
-        if judgement.cp_loss >= threshold:
+        # La mossa migliore secondo il motore non è un errore, anche se la
+        # valutazione dopo la mossa (stessa profondità, un ply più avanti) esce
+        # più bassa: è instabilità della ricerca, non una perdita.
+        if judgement.cp_loss >= threshold and not judgement.is_best:
             mistakes.append(Mistake(
                 game_id=game_id,
                 ply=ply,
