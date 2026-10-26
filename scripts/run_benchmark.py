@@ -22,7 +22,7 @@ from chesstutor.dataset import load_puzzles  # noqa: E402
 from chesstutor.engine import Engine  # noqa: E402
 from chesstutor.metrics import load_results, print_report  # noqa: E402
 from chesstutor.solvers import (  # noqa: E402
-    LLMSolver, RandomSolver, StockfishSolver, anthropic_completer, cached_completer,
+    GreedySolver, LLMSolver, RandomSolver, StockfishSolver, anthropic_completer, cached_completer,
 )
 
 
@@ -37,9 +37,9 @@ def main() -> None:
                         help="include i token di ragionamento: non abbassarlo troppo")
     parser.add_argument("--representations", nargs="+", default=["piece_list"],
                         choices=["fen", "ascii", "piece_list", "piece_list_moves"])
-    parser.add_argument("--baselines", nargs="*", default=["random", "stockfish_n1", "stockfish_d1"],
-                        help="baseline da includere: random, stockfish_dN (profondità), "
-                             "stockfish_nN (nodi)")
+    parser.add_argument("--baselines", nargs="*", default=["random", "greedy", "stockfish_d1"],
+                        help="baseline da includere: random, greedy, stockfish_dN (profondità), "
+                             "stockfish_nN (nodi; nota: n1 equivale circa a d2)")
     parser.add_argument("--judge-depth", type=int, default=16)
     parser.add_argument("--out", default="results/benchmark.csv")
     parser.add_argument("--cache", default="results/llm_cache.jsonl")
@@ -59,6 +59,8 @@ def main() -> None:
         for name in args.baselines:
             if name == "random":
                 solvers.append(RandomSolver(seed=0))
+            elif name == "greedy":
+                solvers.append(GreedySolver(seed=0))
             elif name.startswith("stockfish_d"):
                 solvers.append(StockfishSolver(engine, depth=int(name.split("_d")[1])))
             elif name.startswith("stockfish_n"):

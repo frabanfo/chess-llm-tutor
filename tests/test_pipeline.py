@@ -328,3 +328,41 @@ def test_benchmark_resume_skips_done_and_retries_errors(puzzles, engine, tmp_pat
     assert again.calls == 0                      # tutto già fatto
     df = pd.read_csv(out, keep_default_na=False)
     assert len(df) == 3 and (df["error"] == "").all()
+
+
+@pytest.mark.parametrize("fen,expected", [
+    # Matto in 1 prima di tutto, anche se c'è una donna da prendere.
+    ("6k1/5ppp/8/7q/8/7Q/8/R5K1 w - - 0 1", "a1a8"),
+    # Cattura della donna indifesa.
+    ("4k3/8/8/3q4/8/8/8/3QK3 w - - 0 1", "d1d5"),
+    # Non cattura un pedone difeso con la donna (guadagno 1 - 9 < 0): dà scacco
+    # (il primo in ordine UCI fra Qe2+ e Qh5+).
+    ("4k3/8/2p5/3p4/8/8/8/3QK3 w - - 0 1", "d1e2"),
+])
+def test_greedy_solver(fen, expected):
+    from chesstutor.solvers import GreedySolver
+    board = chess.Board(fen)
+    assert GreedySolver().solve(board).move == chess.Move.from_uci(expected)
+
+
+def test_plots_end_to_end(puzzles, engine, tmp_path):
+    """Dal benchmark ai grafici, con un LLM finto che risponde sempre la prima mossa."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import plots
+    from chesstutor.benchmark import run_benchmark
+    from chesstutor.solvers import GreedySolver, LLMSolver, RandomSolver
+
+    def fake(prompt):
+        return "MOVE: 1. e4\nTHEME: fork\nWHY: test"
+
+    out = tmp_path / "r.csv"
+    run_benchmark(puzzles, [RandomSolver(), GreedySolver(),
+                            LLMSolver(fake, "fen", name="fake:fen"),
+                            LLMSolver(fake, "piece_list", name="fake:piece_list")],
+                  engine, out, judge_depth=8, verbose=False)
+    paths = plots.make_all([str(out)], str(tmp_path / "fig"))
+    names = {p.name for p in paths}
+    assert {"rq1_by_solver.png", "rq2_by_rating.png", "rq3_move_vs_theme.png",
+            "themes_heatmap.png", "summary.md"} <= names
+    summary = (tmp_path / "fig" / "summary.md").read_text(encoding="utf-8")
+    assert "`piece_list` vs `fen`" in summary

@@ -50,6 +50,62 @@ class RandomSolver(Solver):
         return Answer(move=self.rng.choice(moves) if moves else None)
 
 
+PIECE_VALUES = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
+                chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0}
+
+
+class GreedySolver(Solver):
+    """Baseline intermedia: gioca la mossa "visibile" senza calcolare.
+
+    Matto in 1 se c'è; altrimenti la cattura che rende di più (valore preso,
+    meno il pezzo che cattura se la casa è difesa); altrimenti uno scacco;
+    altrimenti una mossa a caso. Misura quanti puzzle si risolvono senza
+    vedere la risposta avversaria, che è l'ipotesi di RQ2. Stockfish non va
+    bene per questo ruolo: anche limitato a 1 nodo completa una ricerca a
+    profondità 2 e risolve >90% dei puzzle a ogni fascia di rating.
+    """
+
+    name = "greedy"
+
+    def __init__(self, seed: int = 0):
+        self.rng = random.Random(seed)
+
+    @staticmethod
+    def _capture_gain(board: chess.Board, move: chess.Move) -> int:
+        if board.is_en_passant(move):
+            victim = 1
+        else:
+            piece = board.piece_at(move.to_square)
+            victim = PIECE_VALUES[piece.piece_type] if piece else 0
+        if move.promotion:
+            victim += PIECE_VALUES[move.promotion] - 1
+        attacker = PIECE_VALUES[board.piece_type_at(move.from_square)]
+        board.push(move)
+        defended = board.is_attacked_by(board.turn, move.to_square)
+        board.pop()
+        return victim - (attacker if defended else 0)
+
+    def solve(self, board: chess.Board) -> Answer:
+        moves = sorted(board.legal_moves, key=lambda m: m.uci())  # ordine stabile
+        if not moves:
+            return Answer(move=None)
+        for move in moves:
+            board.push(move)
+            mate = board.is_checkmate()
+            board.pop()
+            if mate:
+                return Answer(move=move, explanation="mate in 1")
+        gains = [(self._capture_gain(board, m), m) for m in moves
+                 if board.is_capture(m) or m.promotion]
+        best = max(gains, key=lambda g: g[0], default=None)
+        if best and best[0] > 0:
+            return Answer(move=best[1], explanation=f"capture +{best[0]}")
+        checks = [m for m in moves if board.gives_check(m)]
+        if checks:
+            return Answer(move=checks[0], explanation="check")
+        return Answer(move=self.rng.choice(moves))
+
+
 class StockfishSolver(Solver):
     """Baseline superiore, con profondità regolabile.
 
@@ -62,9 +118,9 @@ class StockfishSolver(Solver):
         self.engine = engine
         self.depth = depth
         self.nodes = nodes
-        # Anche a depth=1 Stockfish risolve >90% dei puzzle a ogni fascia di
-        # rating: per una baseline che degradi con la difficoltà serve limitare
-        # i nodi esplorati, non la profondità nominale.
+        # Attenzione: Stockfish completa sempre almeno una iterazione, quindi
+        # con nodes=1 esplora comunque ~60 nodi a profondità 2. Come baseline
+        # debole usare GreedySolver.
         self.name = f"stockfish_n{nodes}" if nodes else f"stockfish_d{depth}"
 
     def solve(self, board: chess.Board) -> Answer:
