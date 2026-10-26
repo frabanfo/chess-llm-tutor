@@ -1,0 +1,9 @@
+PuzzleId,FEN,Moves,Rating,RatingDeviation,Popularity,NbPlays,Themes,GameUrl,OpeningTags
+FIX000,r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 5 4,f6e4 e1g1 d7d5 c4b5 c8g4,1400,75,95,5000,fork advantage short,https://lichess.org/fixture,
+FIX001,r2qkbnr/ppp2ppp/2np4/4p3/2B1P1b1/5N2/PPPP1PPP/RNBQ1RK1 w kq - 4 5,h2h3 g4h5 f1e1 f8e7 b1c3,1500,75,95,5000,pin advantage short,https://lichess.org/fixture,
+FIX002,r3k2r/ppp2ppp/2n5/3qp3/1b6/2N2N2/PPPP1PPP/R1BQKB1R w KQkq - 0 8,c3d5 e8c8 c2c4 f7f6 f3h4,1700,75,95,5000,fork crushing short,https://lichess.org/fixture,
+FIX003,8/8/8/8/4k3/8/4P3/4K3 w - - 0 1,e1d2 e4d4 e2e3 d4e4 d2e2,1600,75,95,5000,endgame zugzwang short,https://lichess.org/fixture,
+FIX004,r1b1kb1r/pppp1ppp/2n5/4N3/2B1n1q1/8/PPPP1PPP/RNBQ1RK1 w kq - 0 1,c4f7 e8d8 e5g4 f8e7 g4e3,2100,75,95,5000,sacrifice crushing short,https://lichess.org/fixture,
+FIX005,2rq1rk1/pp1bbppp/3p1n2/4p3/2B1P3/2N2N2/PPP2PPP/R1BQR1K1 w - - 0 1,c4b3 c8c3 b2c3 d7c6 b3d5,1800,75,95,5000,deflection advantage middlegame,https://lichess.org/fixture,
+FIX006,6k1/pp3ppp/8/8/8/1Q6/PP3PPP/6K1 w - - 0 1,b3b7 g7g5 b7d5 g5g4 g1f1,1100,75,95,5000,hangingPiece crushing endgame,https://lichess.org/fixture,
+FIX007,r4rk1/1pp2ppp/p1nb4/3q4/3P4/2PB1N2/P4PPP/R2Q1RK1 w - - 0 1,c3c4 d5a5 c4c5 d6e7 d1b1,2000,75,95,5000,pin advantage middlegame,https://lichess.org/fixture,

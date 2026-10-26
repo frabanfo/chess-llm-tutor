@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/*.csv
+data/*.zst
+bin/
+results/*.csv
+results/*.jsonl
+.claude/settings.local.json
+results/*.log
