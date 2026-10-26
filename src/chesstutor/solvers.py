@@ -229,8 +229,34 @@ class CompletionError(RuntimeError):
     """Risposta senza testo utilizzabile (rifiuto, troncamento)."""
 
 
+def completer_cache_id(model: str, max_tokens: int, effort: str | None) -> str:
+    """Identifica modello e parametri nella chiave di cache."""
+    return f"anthropic|{model}|max_tokens={max_tokens}|effort={effort}"
+
+
+def request_params(prompt: str, model: str, max_tokens: int, effort: str | None) -> dict:
+    """Parametri di una richiesta Messages: identici per chiamate dirette e batch."""
+    params = {"model": model, "max_tokens": max_tokens,
+              "messages": [{"role": "user", "content": prompt}]}
+    if effort:
+        params["output_config"] = {"effort": effort}
+    return params
+
+
+def response_text(response) -> str:
+    """Testo di una risposta; solleva CompletionError se è inutilizzabile.
+
+    Un rifiuto o una risposta troncata senza riga MOVE è un errore della
+    chiamata, non una mossa illegale del modello.
+    """
+    text = "".join(b.text for b in response.content if b.type == "text")
+    if response.stop_reason in ("refusal", "max_tokens") and "MOVE:" not in text.upper():
+        raise CompletionError(f"stop_reason={response.stop_reason}")
+    return text
+
+
 def anthropic_completer(
-    model: str = "claude-opus-5-5",
+    model: str = "claude-sonnet-5-5",
     max_tokens: int = 16000,
     effort: str | None = "medium",
     max_retries: int = 5,
@@ -243,40 +269,36 @@ def anthropic_completer(
     contano in `max_tokens`: un limite basso tronca la risposta prima della
     riga MOVE. `temperature` non è più accettata, quindi la riproducibilità si
     affida a un `effort` fisso e alla cache. Con modelli che non supportano
-    `effort` (es. Sonnet 4.5, Haiku 4.5) passare `effort=None`.
+    `effort` (es. Haiku 4.5) passare `effort=None`.
+
+    Niente fallback automatico su un altro modello in caso di rifiuto: nel
+    benchmark la risposta di un modello diverso contaminerebbe i risultati, e
+    un rifiuto va registrato come errore.
     """
     import anthropic
 
     client = anthropic.Anthropic(max_retries=max_retries)
-    extra = {"output_config": {"effort": effort}} if effort else {}
 
     def complete(prompt: str) -> str:
-        response = client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-            **extra,
-        )
-        text = "".join(b.text for b in response.content if b.type == "text")
-        if response.stop_reason in ("refusal", "max_tokens") and "MOVE:" not in text.upper():
-            raise CompletionError(f"stop_reason={response.stop_reason}")
-        return text
+        response = client.messages.create(**request_params(prompt, model, max_tokens, effort))
+        return response_text(response)
 
-    complete.cache_id = f"anthropic|{model}|max_tokens={max_tokens}|effort={effort}"
+    complete.cache_id = completer_cache_id(model, max_tokens, effort)
     return complete
 
 
-def cached_completer(complete, cache_path: str, cache_id: str | None = None):
-    """Avvolge un completer con una cache su disco (JSONL).
-
-    Indispensabile: rilancerai il benchmark decine di volte mentre sistemi le
-    metriche, e senza cache pagheresti ogni volta le stesse chiamate.
-
-    La chiave include `cache_id` (modello e parametri; di default quello
-    esposto dal completer): senza, cambiare modello restituirebbe in silenzio
-    le risposte del modello precedente. Gli errori non finiscono in cache.
-    """
+def cache_key(namespace: str, prompt: str) -> str:
     import hashlib
+    return hashlib.sha256(f"{namespace}\0{prompt}".encode()).hexdigest()
+
+
+def append_to_cache(cache_path: str, key: str, namespace: str, response: str) -> None:
+    import json
+    with open(cache_path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"key": key, "model": namespace, "response": response}) + "\n")
+
+
+def load_cache(cache_path: str) -> dict[str, str]:
     import json
     import os
 
@@ -289,17 +311,29 @@ def cached_completer(complete, cache_path: str, cache_id: str | None = None):
                     cache[entry["key"]] = entry["response"]
                 except (json.JSONDecodeError, KeyError):
                     continue
+    return cache
 
+
+def cached_completer(complete, cache_path: str, cache_id: str | None = None):
+    """Avvolge un completer con una cache su disco (JSONL).
+
+    Indispensabile: rilancerai il benchmark decine di volte mentre sistemi le
+    metriche, e senza cache pagheresti ogni volta le stesse chiamate.
+
+    La chiave include `cache_id` (modello e parametri; di default quello
+    esposto dal completer): senza, cambiare modello restituirebbe in silenzio
+    le risposte del modello precedente. Gli errori non finiscono in cache.
+    """
+    cache = load_cache(cache_path)
     namespace = cache_id if cache_id is not None else getattr(complete, "cache_id", "")
 
     def wrapped(prompt: str) -> str:
-        key = hashlib.sha256(f"{namespace}\0{prompt}".encode()).hexdigest()
+        key = cache_key(namespace, prompt)
         if key in cache:
             return cache[key]
         response = complete(prompt)
         cache[key] = response
-        with open(cache_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"key": key, "model": namespace, "response": response}) + "\n")
+        append_to_cache(cache_path, key, namespace, response)
         return response
 
     return wrapped

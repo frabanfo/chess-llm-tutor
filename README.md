@@ -39,7 +39,7 @@ python scripts/get_stockfish.py
 Verifica che tutto giri:
 
 ```bash
-pytest -q            # 47 test, ~3s
+pytest -q            # 55 test, ~5s
 ```
 
 ## Uso
@@ -56,14 +56,41 @@ python scripts/run_benchmark.py --puzzles tests/fixtures/puzzles_sample.csv --dr
 python scripts/download_puzzles.py --per-cell 25 --out data/sample.csv
 ```
 
-**Benchmark completo**, confrontando tre rappresentazioni:
+**Baseline** (nessuna chiamata API, ~1 ora sui 2.006 puzzle):
+
+```bash
+python scripts/run_benchmark.py --puzzles data/sample.csv --dry-run \
+    --baselines random greedy stockfish_d1 stockfish_d2 stockfish_d4 \
+    --out results/baselines.csv
+```
+
+Un run interrotto si riprende con `--resume`: le righe già nel CSV restano,
+quelle con un errore API vengono ritentate.
+
+**Run LLM, via Batch API.** Il benchmark chiama il modello una richiesta alla
+volta: con il ragionamento attivo, 8.000 chiamate sono decine di ore.
+`llm_batch.py` invia le stesse richieste in un unico batch (metà prezzo, di
+solito finito entro un'ora) e scrive le risposte nella cache che il benchmark
+legge. Modello, `--effort`, `--max-tokens` e rappresentazioni devono
+coincidere fra i due script, altrimenti le chiavi di cache non combaciano.
 
 ```bash
 export ANTHROPIC_API_KEY=...
-python scripts/run_benchmark.py --puzzles data/sample.csv \
-    --model claude-opus-5-5 --effort medium \
-    --representations fen ascii piece_list \
-    --out results/run1.csv
+
+# pilota: 200 puzzle, una rappresentazione (~$2-3 con Sonnet 5.5)
+python scripts/llm_batch.py submit --puzzles data/sample.csv --limit 200 \
+    --representations piece_list --dry-run          # conta e stima il costo
+python scripts/llm_batch.py submit --puzzles data/sample.csv --limit 200 --representations piece_list
+python scripts/llm_batch.py collect --wait
+python scripts/run_benchmark.py --puzzles data/sample.csv --limit 200 --baselines \
+    --representations piece_list --out results/pilot.csv
+
+# run completo: 2.006 puzzle x 4 rappresentazioni (~$100 stimati con Sonnet 5.5)
+python scripts/llm_batch.py submit --puzzles data/sample.csv \
+    --representations fen ascii piece_list piece_list_moves
+python scripts/llm_batch.py collect --wait
+python scripts/run_benchmark.py --puzzles data/sample.csv --baselines \
+    --representations fen ascii piece_list piece_list_moves --out results/llm.csv
 ```
 
 Le risposte del modello vengono messe in cache su disco
@@ -75,9 +102,36 @@ I modelli attuali non accettano `temperature` e ragionano prima di
 rispondere: i token di ragionamento contano in `--max-tokens` (default 16000),
 e la riproducibilità si affida a un `--effort` fisso più la cache. Per modelli
 che non supportano `effort` (es. `claude-haiku-4-5`) usare `--effort none`.
+Nessun fallback automatico su un altro modello in caso di rifiuto: la risposta
+di un modello diverso contaminerebbe il confronto.
 
 Le chiamate fallite (rate limit, rifiuti, risposte troncate) finiscono nella
 colonna `error` e sono escluse dai tassi, non contate come mosse illegali.
+
+**Grafici e numeri chiave** (settimana 3). Accetta più CSV, così baseline e run
+LLM possono stare in file separati:
+
+```bash
+python scripts/plots.py --results results/baselines.csv results/llm.csv
+```
+
+Scrive in `results/figures/` i grafici di RQ1 (accuratezza per risolutore, IC
+di Wilson), RQ2 (curva per fascia di rating), RQ3 (mossa trovata vs tema
+riconosciuto), la heatmap per tema, la distribuzione dei cp persi e
+`summary.md` con le tre frasi dei criteri di successo di `PLAN.md`.
+
+**Il tutor** (settimana 4): partite Lichess → errori → profilo → puzzle
+personalizzati → report HTML.
+
+```bash
+python scripts/tutor.py --user <username> --max-games 50            # solo motore
+python scripts/tutor.py --user <username> --max-games 50 --explain  # + spiegazioni LLM
+```
+
+Il PGN scaricato resta in `results/tutor/<username>/` e viene riusato
+(`--refresh` per riscaricarlo); lì finiscono anche `mistakes.csv`,
+`puzzles.csv` e `report.html`. Ogni variante mostrata nel report viene dalla PV
+di Stockfish: l'LLM spiega la linea del motore, non ne inventa di sue.
 
 **Ispeziona i singoli casi** dietro le tabelle aggregate — il CSV ha una riga
 per (puzzle, risolutore), con FEN, mossa attesa, mossa data e cp_loss:
@@ -97,15 +151,19 @@ src/chesstutor/
   engine.py           wrapper Stockfish: valutazioni, giudizio mosse, blunder
   dataset.py          caricamento e campionamento stratificato dei puzzle
   representations.py  4 modi di descrivere una posizione + prompt
-  solvers.py          Random / Stockfish / LLM, con parser delle risposte
+  solvers.py          Random / Greedy / Stockfish / LLM, con parser delle risposte
   benchmark.py        il runner: puzzle x solver → CSV
   metrics.py          aggregazione con intervalli di Wilson
   analysis.py         PGN → errori → profilo → puzzle personalizzati
+  report.py           report HTML del tutor
 scripts/
   get_stockfish.py    scarica Stockfish in bin/ (Windows)
   download_puzzles.py scarica il DB Lichess e campiona
   run_benchmark.py    il benchmark, con report finale
   inspect_results.py  i singoli casi dietro le tabelle
+  llm_batch.py        riempie la cache LLM con la Batch API
+  plots.py            grafici RQ1/RQ2/RQ3 e numeri chiave
+  tutor.py            partite Lichess → report HTML
 tests/                suite pytest + puzzle di fixture verificati
 ```
 
@@ -146,12 +204,17 @@ distinguibile: `metrics.py` riporta sempre l'intervallo di Wilson al 95%
 insieme al tasso, proprio per non invitare a sovrainterpretare il rumore.
 
 Le baseline non sono decorative. `RandomSolver` stabilisce il pavimento (che
-su posizioni con ~30 mosse legali non è zero: a volte azzecca). `StockfishSolver`
-rende il risultato leggibile: "gioca come Stockfish limitato a 1 nodo" comunica
-molto più di "58% di accuratezza". Attenzione però: già a `depth=1` Stockfish
-risolve oltre il 90% dei puzzle in ogni fascia di rating, quindi non distingue
-la difficoltà. `stockfish_n1` (ricerca limitata a 1 nodo) scende da ~89% sotto
-1200 a ~61% sopra 2000, ed è il metro utile per la curva per rating.
+su posizioni con ~30 mosse legali non è zero: risolve il 5%). `GreedySolver`
+gioca la mossa "visibile" senza calcolare: matto in 1, altrimenti la cattura
+che rende di più, altrimenti uno scacco. Scende dal 55% sotto 1200 al 24% sopra
+2400, ed è il metro per la curva di RQ2: un LLM sotto `greedy` non sta
+calcolando nulla.
+
+Stockfish invece non distingue la difficoltà: già a `depth=1` risolve oltre
+l'87% dei puzzle in ogni fascia di rating. E limitarlo per nodi non aiuta:
+Stockfish completa sempre almeno un'iterazione, quindi con `nodes=1` esplora
+comunque ~60 nodi a profondità 2 e risolve il 96-99% ovunque. Le baseline
+Stockfish servono come tetto, non come metro.
 
 Il motore gira con `Threads=1`: a parità di profondità le valutazioni sono
 deterministiche, quindi il benchmark è riproducibile.

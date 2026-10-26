@@ -6,7 +6,7 @@
 
     # run vero, confrontando tre rappresentazioni della posizione
     python scripts/run_benchmark.py --puzzles data/sample.csv \\
-        --model claude-opus-5-5 --representations fen ascii piece_list
+        --model claude-sonnet-5-5 --representations fen ascii piece_list
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--puzzles", required=True)
     parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument("--model", default="claude-opus-5-5")
+    parser.add_argument("--model", default="claude-sonnet-5-5")
     parser.add_argument("--effort", default="medium",
                         help="low/medium/high/xhigh/max; 'none' per modelli che non lo supportano")
     parser.add_argument("--max-tokens", type=int, default=16000,

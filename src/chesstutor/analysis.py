@@ -16,6 +16,10 @@ import chess.pgn
 
 from .engine import BLUNDER_THRESHOLD, MISTAKE_THRESHOLD, Engine
 
+# Nelle medie una perdita oltre questa soglia conta come questa soglia: un matto
+# concesso vale ~10.000 cp compressi, e pochi matti dominerebbero tutto il profilo.
+CP_LOSS_CAP = 1000
+
 LICHESS_GAMES_URL = "https://lichess.org/api/games/user/{username}"
 
 
@@ -31,7 +35,10 @@ def fetch_games(username: str, max_games: int = 200, token: str | None = None,
     params = {"max": max_games, "evals": "false", "clocks": "true", "opening": "true"}
     if perf_type:
         params["perfType"] = perf_type
-    headers = {"Accept": "application/x-chess-pgn"}
+    # Lichess risponde 404 agli user agent generici (python-requests): serve
+    # un'identificazione esplicita del client.
+    headers = {"Accept": "application/x-chess-pgn",
+               "User-Agent": "chess-llm-tutor/0.1 (python-chess)"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
@@ -149,13 +156,17 @@ def weakness_profile(mistakes: list[Mistake]) -> dict:
     """
     by_phase = defaultdict(list)
     for m in mistakes:
-        by_phase[m.phase].append(m.cp_loss)
+        by_phase[m.phase].append(min(m.cp_loss, CP_LOSS_CAP))
 
     blunders = [m for m in mistakes if m.cp_loss >= BLUNDER_THRESHOLD]
+    clocked = [m for m in mistakes if m.time_left is not None]
     return {
+        # Quota di errori fatti con meno di 30 secondi: None se il PGN non ha orologi.
+        "time_trouble": (sum(m.time_left < 30 for m in clocked) / len(clocked)) if clocked else None,
         "total_mistakes": len(mistakes),
         "blunders": len(blunders),
-        "avg_cp_loss": (sum(m.cp_loss for m in mistakes) / len(mistakes)) if mistakes else 0,
+        "avg_cp_loss": (sum(min(m.cp_loss, CP_LOSS_CAP) for m in mistakes) / len(mistakes))
+        if mistakes else 0,
         "by_phase": {
             phase: {
                 "count": len(losses),

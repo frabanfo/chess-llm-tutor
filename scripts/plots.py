@@ -249,7 +249,7 @@ def plot_cp_loss(df, order, colors, label, out: Path) -> Path | None:
         return None
     data = [wrong.loc[wrong["solver"] == s, "cp_loss"].clip(upper=CP_LOSS_CLIP) for s in solvers]
     fig, ax = plt.subplots(figsize=(8, 0.5 * len(solvers) + 1.8))
-    bp = ax.boxplot(data[::-1], vert=False, widths=0.55, patch_artist=True,
+    bp = ax.boxplot(data[::-1], orientation="horizontal", widths=0.55, patch_artist=True,
                     showfliers=False, medianprops={"color": TEXT, "lw": 1.6},
                     whiskerprops={"color": MUTED}, capprops={"color": MUTED})
     for patch, s in zip(bp["boxes"], solvers[::-1]):

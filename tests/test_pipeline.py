@@ -366,3 +366,68 @@ def test_plots_end_to_end(puzzles, engine, tmp_path):
             "themes_heatmap.png", "summary.md"} <= names
     summary = (tmp_path / "fig" / "summary.md").read_text(encoding="utf-8")
     assert "`piece_list` vs `fen`" in summary
+
+
+def test_profile_caps_mates_and_counts_time_trouble():
+    from chesstutor.analysis import CP_LOSS_CAP, Mistake, weakness_profile
+
+    mistakes = [
+        Mistake("g1", 20, "", "Qh5", "Qxd5", 9999, "blunder", "middlegame", time_left=12.0),
+        Mistake("g1", 40, "", "Kf2", "Ke2", 100, "mistake", "endgame", time_left=95.0),
+    ]
+    profile = weakness_profile(mistakes)
+    assert profile["avg_cp_loss"] == (CP_LOSS_CAP + 100) / 2
+    assert profile["time_trouble"] == 0.5
+    no_clock = [Mistake("g", 1, "", "a", "b", 90, "mistake", "opening")]
+    assert weakness_profile(no_clock)["time_trouble"] is None
+
+
+def test_report_renders(engine):
+    import io
+    import chess.pgn
+    from chesstutor.analysis import analyse_game, mistakes_to_puzzles, weakness_profile
+    from chesstutor.report import ExplainedMistake, render_report
+
+    game = chess.pgn.read_game(io.StringIO(HANGING_QUEEN_PGN))
+    mistakes = analyse_game(game, engine, "me", depth=10)
+    puzzles = mistakes_to_puzzles(mistakes, engine, depth=10)
+    page = render_report("me <script>", weakness_profile(mistakes),
+                         [ExplainedMistake(mistakes[0], ["Qxd5"], "Line one.\nLine two.")],
+                         puzzles, games_analysed=1, model="test-model")
+    assert page.startswith("<!doctype html>")
+    assert "me &lt;script&gt;" in page and "<script>" not in page   # testo escapato
+    assert page.count("<svg") == 2                                  # errore + puzzle
+    assert "<p>Line two.</p>" in page and "Qxd5" in page
+    assert "https://lichess.org/abcd1234#0" in page
+
+
+def test_batch_fills_the_same_cache_the_benchmark_reads(puzzles, tmp_path):
+    """Le risposte del batch devono essere trovate dal benchmark senza nuove chiamate."""
+    from types import SimpleNamespace as NS
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import llm_batch
+    from chesstutor.solvers import LLMSolver, cached_completer, completer_cache_id
+
+    cache = str(tmp_path / "cache.jsonl")
+    reqs = llm_batch.build_requests(puzzles[:2], ["fen", "piece_list"], "m", 1000, "low", {})
+    assert len(reqs) == 4 and all(len(r["custom_id"]) == 64 for r in reqs)
+    assert reqs[0]["params"]["output_config"] == {"effort": "low"}
+
+    def ok(text, stop="end_turn"):
+        msg = NS(content=[NS(type="text", text=text)], stop_reason=stop)
+        return NS(type="succeeded", message=msg)
+
+    results = [NS(custom_id=r["custom_id"], result=ok("MOVE: e4\nTHEME: fork")) for r in reqs[:2]]
+    results.append(NS(custom_id=reqs[2]["custom_id"], result=ok("cut", stop="max_tokens")))
+    results.append(NS(custom_id=reqs[3]["custom_id"], result=NS(type="errored")))
+    counts = llm_batch.collect_results(results, completer_cache_id("m", 1000, "low"), cache)
+    assert counts == {"cached": 2, "already": 0, "failed": 2}
+    assert llm_batch.build_requests(puzzles[:2], ["fen", "piece_list"], "m", 1000, "low",
+                                    llm_batch.load_cache(cache)) == reqs[2:]
+
+    def must_not_call(prompt):
+        raise AssertionError("chiamata API inattesa: la chiave di cache non combacia")
+    must_not_call.cache_id = completer_cache_id("m", 1000, "low")
+    complete = cached_completer(must_not_call, cache)
+    # reqs[0] è (puzzle 0, fen): build_requests scorre i puzzle, poi le rappresentazioni.
+    assert LLMSolver(complete, "fen").solve(puzzles[0].board).theme == "fork"
