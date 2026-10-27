@@ -139,6 +139,27 @@ THEME_RE = re.compile(r"THEME:\s*(.+)", re.IGNORECASE)
 WHY_RE = re.compile(r"WHY:\s*(.+)", re.IGNORECASE)
 
 
+def _field_line(label: str) -> re.Pattern:
+    """`LABEL:` a inizio riga, anche con markdown davanti ("**MOVE:** e4")."""
+    return re.compile(rf"^[^\w\n]*{label}[^\w\n:]*:[ \t]*(.+)$", re.IGNORECASE | re.MULTILINE)
+
+
+FIELD_LINES = {"MOVE": _field_line("MOVE"), "THEME": _field_line("THEME"), "WHY": _field_line("WHY")}
+INLINE = {"MOVE": MOVE_RE, "THEME": THEME_RE, "WHY": WHY_RE}
+
+
+def _last_field(text: str, label: str) -> str:
+    """Il valore del campo: l'ULTIMA riga che inizia con `LABEL:`.
+
+    I modelli attuali ragionano spesso per esteso prima della risposta, e nel
+    ragionamento scrivono cose come "the thematic move: the queen...": la
+    prima occorrenza di "move:" non è la risposta, l'ultima riga formattata sì.
+    Se nessuna riga inizia col campo, vale l'ultima occorrenza nel testo.
+    """
+    matches = FIELD_LINES[label].findall(text) or INLINE[label].findall(text)
+    return matches[-1].strip() if matches else ""
+
+
 SAN_TOKEN = r"(?:[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=?[QRBN])?|O-O(?:-O)?)[+#]?"
 FALLBACK_RE = re.compile(rf"(?<![\w-])({SAN_TOKEN})(?![\w-])")
 MOVE_NUMBER_RE = re.compile(r"^\d+\s*(?:\.+|…)\s*")
@@ -173,11 +194,8 @@ def parse_answer(text: str, board: chess.Board) -> Answer:
     un errore, non la si "aggiusta" cercando la più simile. Gonfiare
     l'accuratezza con correzioni benevole renderebbe il benchmark inutile.
     """
-    move_text = ""
-    match = MOVE_RE.search(text)
-    if match:
-        move_text = match.group(1)
-    else:
+    move_text = _last_field(text, "MOVE")
+    if not move_text:
         # Nessun formato rispettato: prendi il primo token che assomiglia a una mossa.
         fallback = FALLBACK_RE.search(text.translate(FIGURINES).replace("0-0", "O-O"))
         if fallback:
@@ -196,12 +214,10 @@ def parse_answer(text: str, board: chess.Board) -> Answer:
             except (ValueError, chess.InvalidMoveError):
                 move = None
 
-    theme = THEME_RE.search(text)
-    why = WHY_RE.search(text)
     return Answer(
         move=move,
-        theme=theme.group(1).strip() if theme else "",
-        explanation=why.group(1).strip() if why else "",
+        theme=_last_field(text, "THEME"),
+        explanation=_last_field(text, "WHY"),
         raw=text,
         illegal_attempt="" if move else cleaned,
     )

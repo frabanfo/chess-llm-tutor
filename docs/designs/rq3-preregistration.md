@@ -176,3 +176,13 @@ suggerimento "hanging piece" quasi rivela la mossa. Si aggiunge un'analisi
 **descrittiva**: D_true calcolato escludendo i 40 puzzle `hangingPiece`
 (`d_true_without_hanging_piece`). Le frasi principali, le soglie e il campione
 non cambiano.
+
+**2 — 2026-10-27, dopo il pilota.** Il parser della risposta (`parse_answer`)
+legge l'**ultima** riga che inizia con `MOVE:` / `THEME:` / `WHY:` (anche con
+markdown davanti), e solo se non c'è ripiega sull'ultima occorrenza nel testo e
+poi sul primo token che sembra una mossa. Prima prendeva la prima occorrenza di
+"move:" ovunque, anche dentro il ragionamento che il modello scrive prima della
+risposta: nel pilota il 22,5% delle risposte `hint_true` risultava illegale per
+questo (dettagli in `rq3-pilot-notes.md`). Prompt, metriche e soglie non
+cambiano. Costo reale misurato: $0,0049 a richiesta, proiezione del principale
+~$8,88.

@@ -685,3 +685,16 @@ def test_rq3_analyse_ignores_the_lenient_theme_column():
                          "theme_correct": True, "solved": False, "legal": True, "errored": False})
     report = rq3.analyse(pd.DataFrame(rows))
     assert report["theme_rate"] == 0 and report["headline_key"] == "falsified"
+
+
+def test_parser_takes_the_last_formatted_line_not_a_word_in_the_reasoning():
+    """Pilota RQ3: il modello ragiona prima di rispondere, e nel ragionamento
+    scrive "the thematic move: the queen..."; la risposta è l'ultima riga MOVE."""
+    board = chess.Board()
+    text = ("Position: White ... Black ...\n\n"
+            "Direct e4 is the thematic move: the queen escapes are few.\n"
+            "theme: maybe a pin? No.\n\n"
+            "**MOVE:** e4\nTHEME: fork\nWHY: it opens lines.")
+    answer = parse_answer(text, board)
+    assert answer.move == chess.Move.from_uci("e2e4")
+    assert answer.theme == "fork" and answer.explanation == "it opens lines."
