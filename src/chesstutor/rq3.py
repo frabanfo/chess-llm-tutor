@@ -118,12 +118,17 @@ def false_theme_candidates(puzzle: Puzzle) -> list[str]:
     vero "discovered attack").
     """
     true = tactical_theme(puzzle)
-    return [
-        f for f in VOCABULARY
-        if f != true
-        and frozenset({f, true}) not in AFFINE_PAIRS
-        and not any(_theme_matches(tag, f) for tag in puzzle.themes)
-    ]
+    named = set(tag_exclusions(puzzle))
+    return [f for f in VOCABULARY
+            if f != true and frozenset({f, true}) not in AFFINE_PAIRS and f not in named]
+
+
+def tag_exclusions(puzzle: Puzzle) -> list[str]:
+    """Temi esclusi solo perché un tag del puzzle li nomina già (regola D3)."""
+    true = tactical_theme(puzzle)
+    return [f for f in VOCABULARY
+            if f != true and frozenset({f, true}) not in AFFINE_PAIRS
+            and any(_theme_matches(tag, f) for tag in puzzle.themes)]
 
 
 def false_theme(puzzle: Puzzle, seed: int = 0) -> str:

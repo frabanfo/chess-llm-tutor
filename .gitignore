@@ -10,3 +10,4 @@ results/*.jsonl
 .claude/settings.local.json
 results/*.log
 results/tutor/
+results/rq3/
