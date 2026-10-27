@@ -169,4 +169,10 @@ il pavimento del tema.
 
 ## Emendamenti
 
-_Nessuno._
+**1 — 2026-10-27, prima del pilota.** Sulle baseline del campione principale
+(`results/rq3/main_baselines.csv`, nessuna chiamata API) `greedy` risolve il
+97,5% dei puzzle `hangingPiece`, contro il 17,5–47,5% degli altri temi: lì il
+suggerimento "hanging piece" quasi rivela la mossa. Si aggiunge un'analisi
+**descrittiva**: D_true calcolato escludendo i 40 puzzle `hangingPiece`
+(`d_true_without_hanging_piece`). Le frasi principali, le soglie e il campione
+non cambiano.

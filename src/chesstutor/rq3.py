@@ -409,6 +409,9 @@ def analyse(df, representation: str = "piece_list", seed: int = 0) -> dict:
         "recognised_missed_ci": wilson_interval(recognised_missed, n),
         "d_true_when_theme_right": split_effect(theme_ok),
         "d_true_when_theme_wrong": split_effect([not t for t in theme_ok]),
+        # Emendamento 1: greedy risolve il 98% dei hangingPiece, quindi lì il
+        # suggerimento quasi rivela la mossa. Descrittivo, non cambia le frasi.
+        "d_true_without_hanging_piece": split_effect([t != "hangingPiece" for t in true_themes]),
         "headline_key": key, "headline": headline,
         "false_hint_key": false_key, "false_hint_sentence": false_sentence,
     }

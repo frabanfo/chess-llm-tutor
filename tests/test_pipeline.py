@@ -668,6 +668,8 @@ def test_rq3_end_to_end_batch_cache_run_analyse(puzzles, tmp_path):
     assert report["move_rate"] == 0 and report["hint_true_rate"] == 1
     assert report["headline_key"] == "needs_where_to_look"
     assert report["false_hint_key"] == "false_ignored"
+    # Emendamento 1: D_true senza hangingPiece è calcolato sugli altri temi.
+    assert report["d_true_without_hanging_piece"][0] == 100
 
 
 def test_rq3_analyse_ignores_the_lenient_theme_column():

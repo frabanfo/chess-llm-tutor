@@ -163,7 +163,8 @@ def render(report: dict, control: dict | None, set_name: str) -> str:
         + " / ".join(pct(r['illegal_rate'][a]) for a in rq3.MOVE_ARMS) + " |",
     ]
     for label, key in (("D_true se il motivo era riconosciuto", "d_true_when_theme_right"),
-                       ("D_true se il motivo non era riconosciuto", "d_true_when_theme_wrong")):
+                       ("D_true se il motivo non era riconosciuto", "d_true_when_theme_wrong"),
+                       ("D_true senza i puzzle hangingPiece", "d_true_without_hanging_piece")):
         lines.append(f"| {label} (descrittivo) | {points(r[key]) if r[key] else 'n/d'} |")
     if control:
         lines += ["", f"Controllo in `{CONTROL_REP}` (descrittivo, {control['n']} puzzle): motivo "
