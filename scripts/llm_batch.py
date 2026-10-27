@@ -45,24 +45,29 @@ PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-sonnet-5-5": (2.0, 10.0),
           "claude-haiku-4-5": (1.0, 5.0)}
 
 
-def build_requests(puzzles, representations, model, max_tokens, effort, cache) -> list[dict]:
-    """Richieste per le coppie (puzzle, rappresentazione) non ancora in cache.
+def requests_for_prompts(prompts, model, max_tokens, effort, cache) -> list[dict]:
+    """Richieste per i prompt non ancora in cache, senza doppioni.
 
     Il custom_id è la chiave di cache stessa (sha256, 64 caratteri esadecimali,
-    il massimo consentito): la raccolta non ha bisogno di altre tabelle.
+    il massimo consentito): la raccolta non ha bisogno di altre tabelle. È
+    l'unico posto che decide chiave e salto della cache per ogni batch.
     """
     namespace = completer_cache_id(model, max_tokens, effort)
     requests, seen = [], set()
-    for puzzle in puzzles:
-        for rep in representations:
-            prompt = build_prompt(puzzle.board, rep)
-            key = cache_key(namespace, prompt)
-            if key in cache or key in seen:
-                continue
-            seen.add(key)
-            requests.append({"custom_id": key,
-                             "params": request_params(prompt, model, max_tokens, effort)})
+    for prompt in prompts:
+        key = cache_key(namespace, prompt)
+        if key in cache or key in seen:
+            continue
+        seen.add(key)
+        requests.append({"custom_id": key,
+                         "params": request_params(prompt, model, max_tokens, effort)})
     return requests
+
+
+def build_requests(puzzles, representations, model, max_tokens, effort, cache) -> list[dict]:
+    """Richieste per le coppie (puzzle, rappresentazione) non ancora in cache."""
+    prompts = (build_prompt(puzzle.board, rep) for puzzle in puzzles for rep in representations)
+    return requests_for_prompts(prompts, model, max_tokens, effort, cache)
 
 
 def estimate_cost(requests: list[dict], model: str, output_tokens: int) -> float | None:
@@ -125,15 +130,20 @@ def cmd_submit(args) -> None:
               f"(ipotesi {args.est_output_tokens} token di output per risposta, ragionamento incluso)")
     if args.dry_run or not requests:
         return
+    submit_batch(requests, completer_cache_id(args.model, args.max_tokens, effort), args.cache)
 
+
+def submit_batch(requests: list[dict], namespace: str, cache: str) -> str:
+    """Invia un batch e lo registra in STATE, così `collect` lo trova."""
     import anthropic
 
     batch = anthropic.Anthropic().messages.batches.create(requests=requests)
     entries = read_state()
-    entries.append({"id": batch.id, "namespace": completer_cache_id(args.model, args.max_tokens, effort),
-                    "cache": args.cache, "requests": len(requests), "collected": False})
+    entries.append({"id": batch.id, "namespace": namespace,
+                    "cache": cache, "requests": len(requests), "collected": False})
     write_state(entries)
     print(f"Batch {batch.id} inviato. Raccogli con: python scripts/llm_batch.py collect --wait")
+    return batch.id
 
 
 def cmd_collect(args) -> None:

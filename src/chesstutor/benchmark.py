@@ -121,7 +121,7 @@ def run_puzzle(puzzle: Puzzle, solver: Solver, engine: Engine, judge_depth: int 
     expected = chess.Move.from_uci(puzzle.first_move)
 
     start = time.perf_counter()
-    answer = solver.solve(board)
+    answer = solver.solve_puzzle(puzzle)
     elapsed = time.perf_counter() - start
 
     got = answer.move

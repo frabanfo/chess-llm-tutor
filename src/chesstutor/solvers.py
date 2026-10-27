@@ -36,6 +36,12 @@ class Solver:
     def solve(self, board: chess.Board) -> Answer:
         raise NotImplementedError
 
+    def solve_puzzle(self, puzzle) -> Answer:
+        """Punto d'ingresso del runner. Di default guarda solo la scacchiera;
+        i risolutori che devono conoscere il puzzle (es. i bracci di RQ3 che
+        suggeriscono il tema) lo ridefiniscono."""
+        return self.solve(puzzle.board)
+
 
 class RandomSolver(Solver):
     """Baseline inferiore: mossa legale a caso. Stabilisce il pavimento."""
@@ -314,7 +320,8 @@ def load_cache(cache_path: str) -> dict[str, str]:
     return cache
 
 
-def cached_completer(complete, cache_path: str, cache_id: str | None = None):
+def cached_completer(complete, cache_path: str, cache_id: str | None = None,
+                     cache_only: bool = False):
     """Avvolge un completer con una cache su disco (JSONL).
 
     Indispensabile: rilancerai il benchmark decine di volte mentre sistemi le
@@ -323,6 +330,10 @@ def cached_completer(complete, cache_path: str, cache_id: str | None = None):
     La chiave include `cache_id` (modello e parametri; di default quello
     esposto dal completer): senza, cambiare modello restituirebbe in silenzio
     le risposte del modello precedente. Gli errori non finiscono in cache.
+
+    Con `cache_only=True` un prompt assente dalla cache solleva
+    CompletionError invece di chiamare l'API: dopo un batch, un prompt che non
+    combacia diventa una riga `error` visibile, non una spesa a prezzo pieno.
     """
     cache = load_cache(cache_path)
     namespace = cache_id if cache_id is not None else getattr(complete, "cache_id", "")
@@ -331,6 +342,8 @@ def cached_completer(complete, cache_path: str, cache_id: str | None = None):
         key = cache_key(namespace, prompt)
         if key in cache:
             return cache[key]
+        if cache_only:
+            raise CompletionError("not in cache")
         response = complete(prompt)
         cache[key] = response
         append_to_cache(cache_path, key, namespace, response)

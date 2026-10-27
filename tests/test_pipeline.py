@@ -431,3 +431,28 @@ def test_batch_fills_the_same_cache_the_benchmark_reads(puzzles, tmp_path):
     complete = cached_completer(must_not_call, cache)
     # reqs[0] è (puzzle 0, fen): build_requests scorre i puzzle, poi le rappresentazioni.
     assert LLMSolver(complete, "fen").solve(puzzles[0].board).theme == "fork"
+
+
+def test_cache_only_turns_a_miss_into_an_error_without_calling_the_api(puzzles, tmp_path):
+    """D2: dopo un batch, un prompt che non combacia non deve diventare una spesa."""
+    from chesstutor.solvers import LLMSolver, cached_completer
+
+    def must_not_call(prompt):
+        raise AssertionError("chiamata API con cache_only=True")
+    must_not_call.cache_id = "m"
+    complete = cached_completer(must_not_call, str(tmp_path / "cache.jsonl"), cache_only=True)
+    answer = LLMSolver(complete, "fen").solve(puzzles[0].board)
+    assert answer.move is None and "not in cache" in answer.error
+
+
+def test_requests_for_prompts_dedups_and_skips_cached():
+    """D5: una sola funzione decide chiave di cache, doppioni e salto della cache."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import llm_batch
+    from chesstutor.solvers import cache_key, completer_cache_id
+
+    namespace = completer_cache_id("m", 1000, "low")
+    cached = {cache_key(namespace, "b"): "MOVE: e4"}
+    reqs = llm_batch.requests_for_prompts(["a", "b", "a", "c"], "m", 1000, "low", cached)
+    assert [r["params"]["messages"][0]["content"] for r in reqs] == ["a", "c"]
+    assert reqs[0]["custom_id"] == cache_key(namespace, "a")
