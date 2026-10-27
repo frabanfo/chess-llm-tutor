@@ -456,3 +456,230 @@ def test_requests_for_prompts_dedups_and_skips_cached():
     reqs = llm_batch.requests_for_prompts(["a", "b", "a", "c"], "m", 1000, "low", cached)
     assert [r["params"]["messages"][0]["content"] for r in reqs] == ["a", "c"]
     assert reqs[0]["custom_id"] == cache_key(namespace, "a")
+
+
+# --- RQ3 a quattro bracci ---------------------------------------------------
+
+GOLDEN_FALSE_THEME = "deflection"  # rq3.false_theme(puzzle 'golden', tema fork, seed 0)
+
+
+def _rq3_pool(puzzles):
+    """Puzzle sintetici: posizioni vere della fixture, temi e rating assegnati."""
+    from dataclasses import replace
+    from chesstutor import rq3
+
+    ratings = (1000, 1400, 1800, 2200, 2600)
+    pool, i = [], 0
+    for theme in rq3.VOCABULARY:
+        for rating in ratings:
+            for k in range(rq3.MAIN_PER_CELL + 1):
+                base = puzzles[i % len(puzzles)]
+                pool.append(replace(base, puzzle_id=f"{theme}-{rating}-{k}", rating=rating,
+                                    themes=(theme, "middlegame", "short")))
+                i += 1
+    return pool
+
+
+def test_rq3_sample_is_balanced_disjoint_and_deterministic(puzzles):
+    from chesstutor import rq3
+
+    pool = _rq3_pool(puzzles)
+    main, pilot = rq3.sample(pool, seed=0)
+    assert len(main) == 400 and len(pilot) == 40
+    assert not {p.puzzle_id for p in main} & {p.puzzle_id for p in pilot}
+    for theme in rq3.VOCABULARY:
+        assert sum(rq3.tactical_theme(p) == theme for p in main) == 40
+        assert sum(rq3.tactical_theme(p) == theme for p in pilot) == 4
+    again = rq3.sample(list(reversed(pool)), seed=0)[0]
+    assert [p.puzzle_id for p in again] == [p.puzzle_id for p in main]
+
+
+def test_rq3_sample_fails_on_a_short_cell(puzzles):
+    """stratified_sample tronca in silenzio; il campione di RQ3 deve fallire."""
+    from chesstutor import rq3
+
+    pool = [p for p in _rq3_pool(puzzles) if not p.puzzle_id.startswith("pin-2600-")]
+    with pytest.raises(ValueError, match="pin"):
+        rq3.sample(pool)
+
+
+def test_rq3_multi_tactical_puzzles_are_out_of_scope(puzzles):
+    from dataclasses import replace
+    from chesstutor import rq3
+
+    assert rq3.tactical_theme(replace(puzzles[0], themes=("fork", "sacrifice"))) is None
+    assert rq3.tactical_theme(replace(puzzles[0], themes=("fork", "kingsideAttack"))) == "fork"
+
+
+def test_rq3_false_theme_rules(puzzles):
+    """Mai il tema vero, mai l'affine, mai un tema nominato da un altro tag (D3)."""
+    from dataclasses import replace
+    from chesstutor import rq3
+
+    fork_with_discovery = replace(puzzles[0], puzzle_id="x", themes=("discoveredCheck", "fork"))
+    assert "discoveredAttack" not in rq3.false_theme_candidates(fork_with_discovery)
+    for i, theme in enumerate(rq3.VOCABULARY):
+        p = replace(puzzles[0], puzzle_id=f"p{i}", themes=(theme,))
+        for seed in range(20):
+            f = rq3.false_theme(p, seed)
+            assert f != theme and frozenset({f, theme}) not in rq3.AFFINE_PAIRS
+    # Golden: cambia se qualcuno usa hash() (salato per processo) o cambia la regola.
+    golden = replace(puzzles[0], puzzle_id="golden", themes=("fork",))
+    assert rq3.false_theme(golden, 0) == GOLDEN_FALSE_THEME
+
+
+def test_rq3_move_prompts_differ_only_in_the_hint_line(puzzles):
+    """D4: l'unica differenza fra i bracci sulla mossa è la riga del suggerimento."""
+    from dataclasses import replace
+    from chesstutor import rq3
+
+    p = replace(puzzles[0], themes=("discoveredAttack",))
+    base = rq3.arm_prompt(p, "move_only")
+    for arm, label in (("hint_true", "discovered attack"),
+                       ("hint_false", rq3.LABELS[rq3.false_theme(p)])):
+        prompt = rq3.arm_prompt(p, arm)
+        hint = f"The tactical motif in this position is: {label}.\n\n"
+        assert hint in prompt and prompt.replace(hint, "") == base
+    theme_prompt = rq3.arm_prompt(p, "theme_only")
+    assert all(label in theme_prompt for label in rq3.LABELS.values())
+    assert "MOVE:" not in theme_prompt and "THEME:" not in base
+
+
+def test_rq3_strict_theme_score():
+    from chesstutor import rq3
+
+    # Le etichette dell'elenco nel prompt devono tornare esattamente al loro tema.
+    assert all(rq3.score_theme(label) == theme for theme, label in rq3.LABELS.items())
+    assert rq3.score_theme("discovered attack") == "discoveredAttack"
+    assert rq3.score_theme("Double check") == "doubleCheck"
+    assert rq3.score_theme("overloading") == "deflection"        # sinonimo
+    assert rq3.score_theme("fork and pin") is None               # due etichette
+    assert rq3.score_theme("zugzwang") is None                   # fuori vocabolario
+    assert rq3.score_theme("") is None
+
+
+def test_rq3_classify_is_a_function_of_the_ci():
+    from chesstutor import rq3
+
+    cases = {(5.1, 9): "grande positivo", (-9, -5.1): "grande negativo",
+             (-5, 5): "equivalente", (1, 4): "equivalente",
+             (0.5, 7): "piccolo positivo", (-7, -0.5): "piccolo negativo",
+             (-3, 8): "inconclusivo", (-8, 3): "inconclusivo"}
+    for (lo, hi), expected in cases.items():
+        assert rq3.classify(lo, hi) == expected, (lo, hi)
+    assert rq3.move_level(0.30, 0.49) == "basso"
+    assert rq3.move_level(0.51, 0.70) == "alto"
+    assert rq3.move_level(0.45, 0.55) == "incerto"
+
+
+def test_rq3_outcome_table_covers_every_row():
+    from chesstutor import rq3
+
+    key = rq3.outcome_key
+    assert key(False, "basso", False, "equivalente") == "falsified"
+    assert key(False, "alto", True, "grande positivo") == "falsified"
+    assert key(True, "basso", False, "equivalente") == "understands_not_calculates"
+    assert key(True, "alto", False, "equivalente") == "redundant_hint"
+    assert key(True, "incerto", False, "equivalente") == "neutral_hint"
+    assert key(True, "basso", False, "grande positivo") == "needs_where_to_look"
+    assert key(True, "basso", False, "piccolo positivo") == "hint_helps"
+    assert key(True, "basso", False, "piccolo negativo") == "hint_hurts"
+    assert key(True, "alto", False, "grande negativo") == "hint_hurts"
+    assert key(True, "basso", False, "inconclusivo") == "inconclusive"
+    assert key(True, "basso", True, "equivalente") == "content_irrelevant"
+    assert key(True, "basso", True, "piccolo positivo") == "true_beats_false"
+    assert key(True, "basso", True, "grande negativo") == "false_beats_true"
+    assert key(True, "basso", True, "inconclusivo") == "true_vs_false_inconclusive"
+    assert rq3.false_hint_key("grande negativo") == rq3.false_hint_key("piccolo negativo") == "false_costs"
+    assert rq3.false_hint_key("equivalente") == "false_ignored"
+    assert rq3.false_hint_key("piccolo positivo") == "any_hint_helps"
+    assert rq3.false_hint_key("inconclusivo") == "false_inconclusive"
+
+
+def test_rq3_paired_bootstrap():
+    from chesstutor import rq3
+
+    same = [1, 0, 1, 1, 0] * 20
+    assert rq3.paired_bootstrap(same, same, samples=500) == (0.0, 0.0, 0.0)
+    better = [1] * 100
+    worse = [1] * 50 + [0] * 50
+    d1 = rq3.paired_bootstrap(better, worse, samples=500, seed=3)
+    assert d1 == rq3.paired_bootstrap(better, worse, samples=500, seed=3)
+    assert d1[0] == 50 and d1[1] > 30
+
+
+def test_rq3_end_to_end_batch_cache_run_analyse(puzzles, tmp_path):
+    """Batch finto -> cache -> run con cache_only -> analyse, senza chiamate API.
+
+    Il modello finto riconosce sempre il motivo e gioca la soluzione solo con il
+    suggerimento giusto: l'esito atteso è "sa cosa cercare solo se glielo dici".
+    """
+    from types import SimpleNamespace as NS
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import llm_batch
+    from chesstutor import rq3
+    from chesstutor.benchmark import run_benchmark
+    from chesstutor.metrics import load_results
+    from chesstutor.solvers import cached_completer, completer_cache_id
+
+    class NoEngine:
+        def judge(self, board, move, depth):
+            return NS(cp_loss=500, mate_before=None, mate_after=None)
+
+    # Una posizione per puzzle: il prompt di theme_only dipende solo dalla
+    # posizione, e la fixture ne ha poche (nei dati veri sono tutte diverse).
+    main, seen = [], set()
+    for theme in rq3.VOCABULARY:  # temi diversi, così il pavimento resta basso
+        p = next((p for p in rq3.sample(_rq3_pool(puzzles))[0]
+                  if rq3.tactical_theme(p) == theme and p.fen not in seen), None)
+        if p:
+            main.append(p)
+            seen.add(p.fen)
+    assert len(main) >= 5
+    namespace = completer_cache_id("m", 1000, "low")
+    cache = str(tmp_path / "cache.jsonl")
+
+    def fake_answer(puzzle, arm):
+        if arm == "theme_only":
+            return f"THEME: {rq3.LABELS[rq3.tactical_theme(puzzle)]}"
+        board = puzzle.board
+        good = board.san(chess.Move.from_uci(puzzle.first_move))
+        bad = next(board.san(m) for m in board.legal_moves if m.uci() != puzzle.first_move)
+        return f"MOVE: {good if arm == 'hint_true' else bad}\nWHY: x"
+
+    prompts = {rq3.arm_prompt(p, a): fake_answer(p, a) for p in main for a in rq3.ARMS}
+    reqs = llm_batch.requests_for_prompts(prompts, "m", 1000, "low", {})
+    results = [NS(custom_id=r["custom_id"], result=NS(type="succeeded", message=NS(
+        content=[NS(type="text", text=prompts[r["params"]["messages"][0]["content"]])],
+        stop_reason="end_turn"))) for r in reqs]
+    assert llm_batch.collect_results(results, namespace, cache)["cached"] == len(prompts)
+
+    def must_not_call(prompt):
+        raise AssertionError("chiamata API inattesa")
+    complete = cached_completer(must_not_call, cache, cache_id=namespace, cache_only=True)
+    solvers = [rq3.ArmLLMSolver(complete, arm, model="m") for arm in rq3.ARMS]
+    out = tmp_path / "rq3.csv"
+    run_benchmark(main, solvers, NoEngine(), out, verbose=False)
+    df = load_results(out)
+    assert not df["errored"].any() and len(df) == 4 * len(main)
+
+    report = rq3.analyse(df)
+    assert report["n"] == len(main) and report["theme_rate"] == 1.0 and report["recognises"]
+    assert report["move_rate"] == 0 and report["hint_true_rate"] == 1
+    assert report["headline_key"] == "needs_where_to_look"
+    assert report["false_hint_key"] == "false_ignored"
+
+
+def test_rq3_analyse_ignores_the_lenient_theme_column():
+    """theme_correct del benchmark è permissiva: analyse deve ricalcolare."""
+    import pandas as pd
+    from chesstutor import rq3
+
+    rows = []
+    for i in range(30):
+        for arm in rq3.ARMS:
+            rows.append({"puzzle_id": f"p{i}", "solver": f"m:piece_list:{arm}", "themes": "fork",
+                         "theme_said": "fork and pin" if arm == "theme_only" else "",
+                         "theme_correct": True, "solved": False, "legal": True, "errored": False})
+    report = rq3.analyse(pd.DataFrame(rows))
+    assert report["theme_rate"] == 0 and report["headline_key"] == "falsified"
