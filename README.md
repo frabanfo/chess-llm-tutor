@@ -1,128 +1,123 @@
 # chess-llm-tutor
 
-**Quanto sono bravi gli LLM a risolvere puzzle di scacchi, e quanto conta il
-modo in cui gli descrivi la posizione?** Il progetto lo misura su 2.006 puzzle
-Lichess, con Stockfish come giudice, e usa quello che impara per costruire un
-tutor che spiega i tuoi errori di partita.
+**How good are LLMs at solving chess puzzles, and how much does the way you describe the
+position matter?** This project measures it on 2,006 Lichess puzzles, with Stockfish as the
+judge, and uses what it learns to build a tutor that explains the mistakes in your games.
 
-Due parti, in quest'ordine:
+Two parts, in this order:
 
-1. **Benchmark**: puzzle stratificati per rating e tema, quattro
-   rappresentazioni della posizione, sei baseline, intervalli di confidenza su
-   ogni numero.
-2. **Tutor**: le tue partite Lichess → errori → profilo di debolezze → puzzle
-   costruiti sulle tue posizioni → report HTML con le spiegazioni.
+1. **Benchmark**: puzzles stratified by rating and theme, four representations of the
+   position, six baselines, confidence intervals on every number.
+2. **Tutor**: your Lichess games → mistakes → weakness profile → puzzles built from your own
+   positions → HTML report with explanations.
 
-La parte 1 giustifica la parte 2. Invece di "ho messo un LLM sopra Stockfish",
-il progetto dice "ho misurato dove l'LLM sbaglia e ho progettato il sistema
-attorno a quel limite": l'LLM spiega la linea del motore, non la calcola.
+Part 1 justifies part 2. Instead of "I put an LLM on top of Stockfish", the project says "I
+measured where the LLM fails and designed the system around that limit": the LLM explains the
+engine's line, it does not calculate it.
 
-## Stato
+## Status
 
-| Parte | Stato |
+| Part | Status |
 | --- | --- |
-| Dataset e campionamento (2.006 puzzle, 5 fasce di rating × 17 temi, ≤ 25 per cella) | Fatto |
-| Baseline: random, greedy, Stockfish a 4 livelli | Fatto, risultati sotto |
-| Run LLM (4 rappresentazioni, via Batch API) | Pronto, non ancora lanciato |
-| Grafici e numeri chiave delle domande di ricerca | Fatto |
-| Tutor con report HTML | Fatto; spiegazioni LLM opzionali |
+| Dataset and sampling (2,006 puzzles, 5 rating bands × 17 themes, ≤ 25 per cell) | Done |
+| Baselines: random, greedy, Stockfish at 4 levels | Done, results below |
+| LLM run (4 representations, via Batch API) | Ready, not launched yet |
+| Plots and key numbers for the research questions | Done |
+| Tutor with HTML report | Done; LLM explanations optional |
 
-55 test, tutti verdi.
+55 tests, all green.
 
-## Risultati finora: le baseline
+## Results so far: the baselines
 
-Prima di misurare un LLM servono un pavimento, un tetto e soprattutto un metro
-che vari con la difficoltà. Su tutti i 2.006 puzzle:
+Before measuring an LLM you need a floor, a ceiling and above all a yardstick that varies with
+difficulty. On all 2,006 puzzles:
 
-![Accuratezza per risolutore](results/figures/rq1_by_solver.png)
+![Accuracy by solver](results/figures/rq1_by_solver.png)
 
-- **random** risolve il 5,0%: la conferma che la posizione viene estratta bene
-  dal dataset (`PLAN.md` fissa la soglia d'allarme fra il 5 e l'8%).
-- **greedy** risolve il 35,0%. Gioca la mossa "visibile" senza calcolare: matto
-  in 1, altrimenti la cattura più redditizia, altrimenti uno scacco.
-- **Stockfish** risolve fra il 91,6% (profondità 1) e il 97,8% (profondità 4).
+- **random** solves 5.0%: confirmation that the position is extracted correctly from the
+  dataset (`PLAN.md` sets the alarm threshold between 5 and 8%).
+- **greedy** solves 35.0%. It plays the "visible" move without calculating: mate in 1,
+  otherwise the most profitable capture, otherwise a check.
+- **Stockfish** solves between 91.6% (depth 1) and 97.8% (depth 4).
 
-Il punto che conta per la domanda RQ2 è come cambiano con la difficoltà:
+What matters for RQ2 is how they change with difficulty:
 
-![Accuratezza per fascia di rating](results/figures/rq2_by_rating.png)
+![Accuracy by rating band](results/figures/rq2_by_rating.png)
 
-`greedy` scende dal 55% sotto i 1200 al 24% sopra i 2400; Stockfish resta
-piatto. È `greedy` il metro contro cui leggere la curva dell'LLM: un LLM che
-gli resta parallelo sta vedendo le tattiche immediate senza calcolare.
+`greedy` drops from 55% below 1200 to 24% above 2400; Stockfish stays flat. `greedy` is the
+yardstick for reading the LLM curve: an LLM that runs parallel to it is seeing immediate
+tactics without calculating.
 
-> **Una sorpresa lungo la strada.** Limitare Stockfish a un nodo
-> (`stockfish_n1`) sembrava il modo naturale di ottenere una baseline debole.
-> Non lo è: Stockfish completa sempre almeno un'iterazione, quindi con
-> `nodes=1` esplora comunque ~60 nodi a profondità 2 e risolve il 97%.
-> Da qui la baseline `greedy`.
+> **A surprise along the way.** Limiting Stockfish to one node (`stockfish_n1`) looked like the
+> natural way to get a weak baseline. It isn't: Stockfish always completes at least one
+> iteration, so with `nodes=1` it still explores ~60 nodes at depth 2 and solves 97%.
+> Hence the `greedy` baseline.
 
-Per tema, la mossa visibile basta quasi sempre per i pezzi in presa (92%) e
-quasi mai per inchiodature, infilate, pezzi intrappolati e zugzwang (17–24%):
+By theme, the visible move is almost always enough for hanging pieces (92%) and almost never for
+pins, skewers, trapped pieces and zugzwang (17–24%):
 
-![Accuratezza per tema](results/figures/themes_heatmap.png)
+![Accuracy by theme](results/figures/themes_heatmap.png)
 
-Quando sbagliano, le baseline sbagliano di molto: la mossa sbagliata di
-`greedy` costa una mediana di 930 centipawn, quasi sempre un pezzo intero, e
-due errori su tre di Stockfish a profondità 1 coinvolgono un matto forzato
-([grafico](results/figures/cp_loss.png)). Tutti i numeri, con gli intervalli di
-confidenza, sono in [`results/figures/summary.md`](results/figures/summary.md).
+When the baselines are wrong, they are very wrong: `greedy`'s wrong move costs a median of 930
+centipawns, almost always a whole piece, and two out of three Stockfish depth-1 errors involve a
+forced mate ([plot](results/figures/cp_loss.png)). All numbers, with confidence intervals, are in
+[`results/figures/summary.md`](results/figures/summary.md).
 
-## Le domande di ricerca
+## Research questions
 
-| | Domanda | Cosa serve per rispondere |
+| | Question | What is needed to answer |
 | --- | --- | --- |
-| **RQ1** | La rappresentazione conta più della difficoltà? Stessa posizione come FEN, diagramma ASCII, lista dei pezzi, lista + mosse legali. | Run LLM sulle 4 rappresentazioni |
-| **RQ2** | La curva per rating crolla netta o cala piano? | Run LLM + la curva di `greedy` qui sopra |
-| **RQ3** | Riconoscere il motivo tattico è più facile che trovare la mossa? | Run LLM: il modello dichiara anche il tema |
+| **RQ1** | Does the representation matter more than difficulty? Same position as FEN, ASCII diagram, piece list, piece list + legal moves. | LLM run on the 4 representations |
+| **RQ2** | Does accuracy collapse sharply with rating or decline gradually? | LLM run + the `greedy` curve above |
+| **RQ3** | Is recognising the tactical motif easier than finding the move? | LLM run: the model also states the theme |
 
-Se la risposta a RQ3 è sì, il modello *capisce* il tipo di posizione ma non sa
-calcolare. È esattamente ciò che autorizza il design del tutor: all'LLM si
-chiede di spiegare l'analisi del motore, non di calcolarla.
+If the answer to RQ3 is yes, the model *understands* the type of position but cannot calculate.
+That is exactly what justifies the tutor's design: the LLM is asked to explain the engine's
+analysis, not to compute it.
 
-## Il tutor
+## The tutor
 
 ```bash
-python scripts/tutor.py --user <username-lichess> --max-games 50
+python scripts/tutor.py --user <lichess-username> --max-games 50
 ```
 
-Scarica le partite, le analizza con Stockfish mossa per mossa (solo le tue),
-raccoglie gli errori da almeno 80 centipawn e produce un report HTML
-autonomo: il profilo, i 10 errori peggiori su scacchiera e una serie di puzzle
-costruiti sulle posizioni in cui hai sbagliato.
+It downloads your games, analyses them move by move with Stockfish (your moves only), collects
+mistakes of at least 80 centipawns and produces a self-contained HTML report: your profile, your
+10 worst mistakes on a board and a set of puzzles built from the positions where you went wrong.
 
-![Report del tutor](docs/img/tutor_report.png)
+![Tutor report](docs/img/tutor_report.png)
 
-Su 50 partite di prova (46 blitz 3+2, rating mediano 1728) ha trovato 271
-errori, 5,4 a partita, di cui 151 blunder. Con meno di 30 secondi
-sull'orologio la quota di mosse sbagliate sale dal 18% al 25%.
+On 50 test games (46 blitz 3+2, median rating 1728) it found 271 mistakes, 5.4 per game, of which
+151 were blunders. With less than 30 seconds on the clock the share of bad moves rises from 18%
+to 25%.
 
-Con `--explain` ogni errore riceve due paragrafi scritti dall'LLM, a partire
-dalla linea principale di Stockfish. Il prompt vieta di inventare varianti: è
-lì che gli LLM sbagliano con più sicurezza, e uno strumento didattico che
-produce analisi eloquenti e sbagliate è il peggior risultato possibile.
+With `--explain` each mistake gets two paragraphs written by the LLM, starting from Stockfish's
+principal variation. The prompt forbids inventing variations: that is where LLMs are most
+confidently wrong, and a teaching tool that produces eloquent but wrong analysis is the worst
+possible outcome.
 
-## Come funziona
+## How it works
 
 ```mermaid
 flowchart LR
     subgraph Benchmark
-        A[DB puzzle Lichess<br/>~6,1 M puzzle] --> B[Campione stratificato<br/>2.006 puzzle]
-        B --> C[Risolutori<br/>random · greedy · Stockfish · LLM]
-        C --> D[Giudice Stockfish<br/>esatta / equivalente / cp persi]
-        D --> E[CSV risultati] --> F[Grafici e IC di Wilson]
+        A[Lichess puzzle DB<br/>~6.1 M puzzles] --> B[Stratified sample<br/>2,006 puzzles]
+        B --> C[Solvers<br/>random · greedy · Stockfish · LLM]
+        C --> D[Stockfish judge<br/>exact / equivalent / cp lost]
+        D --> E[Results CSV] --> F[Plots and Wilson CIs]
     end
     subgraph Tutor
-        G[Partite Lichess] --> H[Analisi Stockfish<br/>delle tue mosse]
-        H --> I[Profilo + puzzle personalizzati]
-        I --> J[Spiegazioni LLM<br/>ancorate alla PV]
-        J --> K[Report HTML]
+        G[Lichess games] --> H[Stockfish analysis<br/>of your moves]
+        H --> I[Profile + personalised puzzles]
+        I --> J[LLM explanations<br/>anchored to the PV]
+        J --> K[HTML report]
     end
-    F -. la configurazione migliore .-> J
+    F -. best configuration .-> J
 ```
 
 ## Quick start
 
-Requisiti: Python 3.12 (la versione su cui gira la suite di test) e Stockfish.
+Requirements: Python 3.12 (the version the test suite runs on) and Stockfish.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\Activate.ps1
@@ -131,30 +126,30 @@ pip install -r requirements.txt
 # Stockfish
 sudo apt install stockfish        # Debian/Ubuntu
 brew install stockfish            # macOS
-python scripts/get_stockfish.py   # Windows: scarica la build giusta per la CPU in bin/
-# oppure: export STOCKFISH_PATH=/percorso/del/binario
+python scripts/get_stockfish.py   # Windows: downloads the right build for your CPU into bin/
+# or: export STOCKFISH_PATH=/path/to/binary
 
-pytest -q                         # 55 test, ~5 s
+pytest -q                         # 55 tests, ~5 s
 ```
 
-Una prova a secco, senza scaricare nulla e senza chiamate API:
+A dry run, with no downloads and no API calls:
 
 ```bash
 python scripts/run_benchmark.py --puzzles tests/fixtures/puzzles_sample.csv --dry-run
 ```
 
-## Riprodurre i risultati
+## Reproducing the results
 
-I dati e i CSV dei risultati non sono nel repository (il database dei puzzle
-pesa oltre 1 GB); i grafici sì. Per rigenerare tutto:
+Data and result CSVs are not in the repository (the puzzle database is over 1 GB); the plots are.
+To regenerate everything:
 
-**1. Il campione** (download unico; il CSV scompattato pesa ~1,1 GB):
+**1. The sample** (one-off download; the unpacked CSV is ~1.1 GB):
 
 ```bash
 python scripts/download_puzzles.py --per-cell 25 --out data/sample.csv
 ```
 
-**2. Le baseline** (nessuna chiamata API, circa un'ora):
+**2. The baselines** (no API calls, about one hour):
 
 ```bash
 python scripts/run_benchmark.py --puzzles data/sample.csv --dry-run \
@@ -162,27 +157,26 @@ python scripts/run_benchmark.py --puzzles data/sample.csv --dry-run \
     --out results/baselines.csv
 ```
 
-Un run interrotto riparte con `--resume`: le righe già scritte restano, quelle
-con un errore API vengono ritentate.
+An interrupted run restarts with `--resume`: rows already written are kept, rows with an API
+error are retried.
 
-**3. Il run LLM.** Il benchmark interroga il modello una richiesta alla volta,
-e con il ragionamento attivo 8.000 chiamate richiedono decine di ore.
-`llm_batch.py` invia le stesse richieste con la Message Batches API (metà
-prezzo, di solito finito entro un'ora) e scrive le risposte nella cache che il
-benchmark legge.
+**3. The LLM run.** The benchmark queries the model one request at a time, and with reasoning
+enabled 8,000 calls take tens of hours. `llm_batch.py` sends the same requests through the
+Message Batches API (half price, usually done within an hour) and writes the answers into the
+cache the benchmark reads.
 
 ```bash
 export ANTHROPIC_API_KEY=...
 
-# pilota: 200 puzzle, una rappresentazione (~$2,5 stimati con Sonnet 5.5)
+# pilot: 200 puzzles, one representation (~$2.5 estimated with Sonnet 5.5)
 python scripts/llm_batch.py submit --puzzles data/sample.csv --limit 200 \
-    --representations piece_list --dry-run     # conta le richieste e stima il costo
+    --representations piece_list --dry-run     # counts requests and estimates cost
 python scripts/llm_batch.py submit --puzzles data/sample.csv --limit 200 --representations piece_list
 python scripts/llm_batch.py collect --wait
 python scripts/run_benchmark.py --puzzles data/sample.csv --limit 200 --baselines \
     --representations piece_list --out results/pilot.csv
 
-# completo: 2.006 puzzle × 4 rappresentazioni (~$100 stimati con Sonnet 5.5)
+# full: 2,006 puzzles × 4 representations (~$100 estimated with Sonnet 5.5)
 python scripts/llm_batch.py submit --puzzles data/sample.csv \
     --representations fen ascii piece_list piece_list_moves
 python scripts/llm_batch.py collect --wait
@@ -190,124 +184,113 @@ python scripts/run_benchmark.py --puzzles data/sample.csv --baselines \
     --representations fen ascii piece_list piece_list_moves --out results/llm.csv
 ```
 
-Modello, `--effort`, `--max-tokens` e rappresentazioni devono coincidere fra i
-due script: fanno parte della chiave di cache.
+Model, `--effort`, `--max-tokens` and representations must match between the two scripts: they
+are part of the cache key.
 
-**4. Grafici e numeri chiave:**
+**4. Plots and key numbers:**
 
 ```bash
 python scripts/plots.py --results results/baselines.csv results/llm.csv
 ```
 
-Scrive in `results/figures/` i grafici di RQ1, RQ2 e RQ3, la heatmap per tema,
-la distribuzione dei centipawn persi e `summary.md` con le tre frasi dei
-criteri di successo, già con i numeri.
+Writes the RQ1, RQ2 and RQ3 plots, the theme heatmap, the centipawn-loss distribution and
+`summary.md` (the three success-criteria sentences, with the numbers filled in) to
+`results/figures/`.
 
 <details>
-<summary><b>Guardare i singoli casi dietro le tabelle</b></summary>
+<summary><b>Looking at the individual cases behind the tables</b></summary>
 
-Il CSV ha una riga per (puzzle, risolutore), con FEN, mossa attesa, mossa data,
-cp persi e, per l'LLM, la risposta integrale.
+The CSV has one row per (puzzle, solver), with FEN, expected move, played move, cp lost and, for
+the LLM, the full answer.
 
 ```bash
-python scripts/inspect_results.py --results results/baselines.csv --failed       # non risolti, per cp persi
-python scripts/inspect_results.py --results results/llm.csv --illegal            # mosse illegali
-python scripts/inspect_results.py --results results/llm.csv --equivalent         # risolti senza la mossa ufficiale
-python scripts/inspect_results.py --results results/llm.csv --errors             # chiamate API fallite
-python scripts/inspect_results.py --results results/llm.csv --puzzle 9rklp --raw # scheda + risposta integrale
+python scripts/inspect_results.py --results results/baselines.csv --failed       # unsolved, by cp lost
+python scripts/inspect_results.py --results results/llm.csv --illegal            # illegal moves
+python scripts/inspect_results.py --results results/llm.csv --equivalent         # solved without the official move
+python scripts/inspect_results.py --results results/llm.csv --errors             # failed API calls
+python scripts/inspect_results.py --results results/llm.csv --puzzle 9rklp --raw # card + full answer
 ```
 
 </details>
 
 <details>
-<summary><b>Note sull'uso dell'API</b></summary>
+<summary><b>Notes on API usage</b></summary>
 
-- Le risposte vanno in cache su disco (`results/llm_cache.jsonl`) con una
-  chiave che include modello, `effort` e `max_tokens`. Rilanciare il benchmark
-  dopo aver cambiato le metriche non costa nulla, e cambiare modello non riusa
-  per sbaglio le risposte di un altro.
-- I modelli attuali non accettano `temperature` e ragionano prima di
-  rispondere: i token di ragionamento contano in `--max-tokens` (default
-  16.000). La riproducibilità si affida a un `--effort` fisso più la cache.
-  Per i modelli che non supportano `effort` (es. `claude-haiku-4-5`):
-  `--effort none`.
-- Nessun fallback automatico su un altro modello in caso di rifiuto: la
-  risposta di un modello diverso contaminerebbe il confronto.
-- Le chiamate fallite (rate limit, rifiuti, risposte troncate) finiscono nella
-  colonna `error` e sono escluse dai tassi, non contate come mosse illegali.
+- Answers are cached on disk (`results/llm_cache.jsonl`) with a key that includes model,
+  `effort` and `max_tokens`. Re-running the benchmark after changing the metrics costs nothing,
+  and switching model never accidentally reuses another model's answers.
+- Current models do not accept `temperature` and reason before answering: reasoning tokens count
+  towards `--max-tokens` (default 16,000). Reproducibility relies on a fixed `--effort` plus the
+  cache. For models that do not support `effort` (e.g. `claude-haiku-4-5`): `--effort none`.
+- No automatic fallback to another model on refusal: an answer from a different model would
+  contaminate the comparison.
+- Failed calls (rate limits, refusals, truncated answers) go into the `error` column and are
+  excluded from the rates, not counted as illegal moves.
 
 </details>
 
-## Scelte metodologiche
+## Methodological choices
 
-**Il campo FEN del dataset Lichess non è la posizione del puzzle.** È la
-posizione *prima* della mossa avversaria; la posizione da risolvere si ottiene
-applicando la prima mossa di `Moves`. È l'errore più comune con questo dataset
-e produce metriche plausibili ma senza senso. Il test
-`test_setup_fen_is_not_puzzle_fen` fallisce se qualcuno "semplifica" il passaggio.
+**The FEN field in the Lichess dataset is not the puzzle position.** It is the position *before*
+the opponent's move; the position to solve is obtained by applying the first move in `Moves`.
+This is the most common mistake with this dataset and it produces plausible but meaningless
+metrics. The test `test_setup_fen_is_not_puzzle_fen` fails if someone "simplifies" that step.
 
-**Una mossa illegale resta illegale.** Il parser accetta SAN e UCI e tollera
-markdown, numeri di mossa, figurine Unicode e arrocchi scritti con gli zeri, ma
-non cerca la mossa legale "più simile". Aggiustare le risposte gonfia
-l'accuratezza; il tasso di mosse illegali è di per sé un risultato.
+**An illegal move stays illegal.** The parser accepts SAN and UCI and tolerates markdown, move
+numbers, Unicode figurines and castling written with zeros, but it does not look for the "closest"
+legal move. Fixing up answers inflates accuracy; the illegal-move rate is a result in itself.
 
-**Risolto ≠ mossa ufficiale.** Un puzzle conta come risolto se la mossa
-coincide con la soluzione di Lichess *oppure* se il motore la giudica
-equivalente (entro 30 centipawn). Con un matto forzato in gioco la tolleranza
-non basta: compressi in centipawn, matto in 1 e matto in 10 distano 9 cp, quindi
-serve un matto altrettanto rapido. Le due metriche restano separate nel CSV
-(`exact_match`, `engine_equivalent`).
+**Solved ≠ official move.** A puzzle counts as solved if the move matches the Lichess solution
+*or* the engine judges it equivalent (within 30 centipawns). With a forced mate on the board the
+tolerance is not enough: compressed into centipawns, mate in 1 and mate in 10 are 9 cp apart, so
+an equally fast mate is required. The two metrics stay separate in the CSV (`exact_match`,
+`engine_equivalent`).
 
-**Il tema si riconosce per frase, non per parola.** `theme_correct` accetta i
-sinonimi di `THEME_SYNONYMS` ("double attack" per `fork`, "x-ray" per
-`xRayAttack`), non parole generiche come "attack", "piece" o "mate", che
-gonfierebbero proprio RQ3.
+**Themes are recognised by phrase, not by word.** `theme_correct` accepts the synonyms in
+`THEME_SYNONYMS` ("double attack" for `fork`, "x-ray" for `xRayAttack`), not generic words like
+"attack", "piece" or "mate", which would inflate exactly RQ3.
 
-**Ogni tasso ha il suo intervallo.** Con 25 puzzle per cella la differenza fra
-60% e 68% non è distinguibile dal rumore: `metrics.py` riporta sempre
-l'intervallo di Wilson al 95%, e il confronto fra rappresentazioni usa la
-differenza appaiata sugli stessi puzzle.
+**Every rate has its interval.** With 25 puzzles per cell the difference between 60% and 68% is
+indistinguishable from noise: `metrics.py` always reports the 95% Wilson interval, and comparisons
+between representations use the paired difference on the same puzzles.
 
-**Riproducibile.** Stockfish gira con `Threads=1` (valutazioni deterministiche
-a parità di profondità), il campionamento ha un seed fisso, le risposte
-dell'LLM restano in cache.
+**Reproducible.** Stockfish runs with `Threads=1` (deterministic evaluations at a given depth),
+sampling has a fixed seed, LLM answers are cached.
 
-**Nel tutor, i matti non dominano le medie.** Un matto concesso vale ~10.000 cp
-compressi: le medie del profilo tagliano ogni perdita a 1.000 cp. La mossa che
-Stockfish stesso considera migliore non è mai contata come errore, anche quando
-la valutazione un ply dopo esce più bassa per instabilità della ricerca.
+**In the tutor, mates do not dominate the averages.** A conceded mate is worth ~10,000 compressed
+cp: profile averages cap each loss at 1,000 cp. The move Stockfish itself considers best is never
+counted as a mistake, even when the evaluation one ply later comes out lower because of search
+instability.
 
-## Struttura
+## Structure
 
 ```
 src/chesstutor/
-  dataset.py          caricamento e campionamento stratificato dei puzzle
-  representations.py  4 modi di descrivere una posizione + prompt
+  dataset.py          loading and stratified sampling of puzzles
+  representations.py  4 ways to describe a position + prompts
   solvers.py          Random / Greedy / Stockfish / LLM, parser, cache
-  engine.py           wrapper Stockfish: valutazioni, giudizio delle mosse
-  benchmark.py        il runner: puzzle × risolutore → CSV, ripresa dei run
-  metrics.py          aggregazione con intervalli di Wilson
-  analysis.py         PGN → errori → profilo → puzzle personalizzati
-  report.py           report HTML del tutor
+  engine.py           Stockfish wrapper: evaluations, move judgement
+  benchmark.py        the runner: puzzle × solver → CSV, resumable runs
+  metrics.py          aggregation with Wilson intervals
+  analysis.py         PGN → mistakes → profile → personalised puzzles
+  report.py           tutor HTML report
 scripts/
-  get_stockfish.py    scarica Stockfish in bin/ (Windows)
-  download_puzzles.py scarica il DB Lichess e campiona
-  run_benchmark.py    il benchmark, con report finale
-  llm_batch.py        riempie la cache LLM con la Batch API
-  plots.py            grafici RQ1/RQ2/RQ3 e numeri chiave
-  inspect_results.py  i singoli casi dietro le tabelle
-  tutor.py            partite Lichess → report HTML
-tests/                suite pytest + puzzle di fixture verificati
-results/figures/      grafici e numeri chiave delle baseline
-PLAN.md               piano di lavoro e criteri di successo
+  get_stockfish.py    downloads Stockfish into bin/ (Windows)
+  download_puzzles.py downloads the Lichess DB and samples it
+  run_benchmark.py    the benchmark, with a final report
+  llm_batch.py        fills the LLM cache via the Batch API
+  plots.py            RQ1/RQ2/RQ3 plots and key numbers
+  inspect_results.py  the individual cases behind the tables
+  tutor.py            Lichess games → HTML report
+tests/                pytest suite + verified fixture puzzles
+results/figures/      baseline plots and key numbers
+PLAN.md               work plan and success criteria
 ```
 
-## Dati
+## Data
 
-- Puzzle: [database.lichess.org](https://database.lichess.org/) (CC0).
-- Partite: [API Lichess](https://lichess.org/api), endpoint
-  `/api/games/user/{username}`. Nessuna autenticazione per le partite
-  pubbliche; serve però un `User-Agent` esplicito, perché quello di default di
-  `requests` riceve un 404.
-- Motore: [Stockfish](https://stockfishchess.org/) (GPL-3.0), non incluso nel
-  repository.
+- Puzzles: [database.lichess.org](https://database.lichess.org/) (CC0).
+- Games: [Lichess API](https://lichess.org/api), endpoint `/api/games/user/{username}`. No
+  authentication needed for public games, but an explicit `User-Agent` is required, because the
+  `requests` default one gets a 404.
+- Engine: [Stockfish](https://stockfishchess.org/) (GPL-3.0), not included in the repository.
