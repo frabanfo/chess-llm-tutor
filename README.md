@@ -17,15 +17,19 @@ engine's line, it does not calculate it.
 
 ## Status
 
+As of 2026-11-19.
+
 | Part | Status |
 | --- | --- |
 | Dataset and sampling (2,006 puzzles, 5 rating bands × 17 themes, ≤ 25 per cell) | Done |
-| Baselines: random, greedy, Stockfish at 4 levels | Done, results below |
-| LLM run (4 representations, via Batch API) | Ready, not launched yet |
-| Plots and key numbers for the research questions | Done |
+| Baselines: random, greedy, Stockfish at 4 levels | Done, [results below](#results-so-far-the-baselines) |
+| RQ3 four-arm experiment (400 puzzles, `claude-sonnet-5-5`, preregistered) | Done, [result below](#rq3-does-knowing-the-motif-help-find-the-move) |
+| RQ1/RQ2: LLM run on 2,006 puzzles × 4 representations | Ready, not launched yet |
+| Plots and key numbers | Done for the baselines; the preregistered RQ3 figure is missing |
 | Tutor with HTML report | Done; LLM explanations optional |
 
-55 tests, all green.
+API spend so far: $18.60, all on RQ3 (details in the
+[run notes](docs/designs/rq3-run-notes.md), in Italian). 70 tests, all green.
 
 ## Results so far: the baselines
 
@@ -65,15 +69,74 @@ forced mate ([plot](results/figures/cp_loss.png)). All numbers, with confidence 
 
 ## Research questions
 
-| | Question | What is needed to answer |
+| | Question | Status |
 | --- | --- | --- |
-| **RQ1** | Does the representation matter more than difficulty? Same position as FEN, ASCII diagram, piece list, piece list + legal moves. | LLM run on the 4 representations |
-| **RQ2** | Does accuracy collapse sharply with rating or decline gradually? | LLM run + the `greedy` curve above |
-| **RQ3** | Is recognising the tactical motif easier than finding the move? | LLM run: the model also states the theme |
+| **RQ1** | Does the representation matter more than difficulty? Same position as FEN, ASCII diagram, piece list, piece list + legal moves. | To do: LLM run on the 4 representations. Early hint from the RQ3 control: `fen` and `piece_list` are close (39% vs 37% on the move, 100 puzzles) |
+| **RQ2** | Does accuracy collapse sharply with rating or decline gradually? | To do: same run, read against the `greedy` curve |
+| **RQ3** | Is recognising the motif enough, or does the model also need to know where to look? | **Done**, result below |
 
-If the answer to RQ3 is yes, the model *understands* the type of position but cannot calculate.
-That is exactly what justifies the tutor's design: the LLM is asked to explain the engine's
-analysis, not to compute it.
+### RQ3: does knowing the motif help find the move?
+
+The starting hypothesis was "it understands, it doesn't calculate": the model recognises the type
+of position but does not find the move, and telling it the motif changes nothing. To test it, the
+same 400 single-theme puzzles (40 for each of 10 themes, balanced by rating band) go through four
+arms:
+
+- `theme_only`: which tactical motif is in the position?
+- `move_only`: find the best move;
+- `hint_true`: find the move, given the correct motif;
+- `hint_false`: find the move, given a wrong but plausible motif.
+
+Metrics, thresholds and the sentence to write for every possible outcome were fixed before
+seeing the data, in [`docs/designs/rq3-preregistration.md`](docs/designs/rq3-preregistration.md),
+**frozen at commit `ec7f7f4`** before the batch was sent. Model `claude-sonnet-5-5`,
+`effort=medium`; 1,800 answers, none failed.
+
+> **It knows what to look for only if you tell it: the bottleneck is where to look.**
+> The effect of a wrong motif cannot be distinguished with 400 puzzles.
+
+| Measure | Value [95% CI] |
+| --- | --- |
+| Recognises the motif (`theme_only`) | 31.5% [27.1–36.2]; chance is 10% |
+| Finds the move alone (`move_only`) | 37.2% [32.7–42.1]; `random` 5.5% |
+| ... with the correct motif (`hint_true`) | 47.8% |
+| ... with a wrong motif (`hint_false`) | 35.2% |
+| Effect of the correct motif (hint_true − move_only) | **+10.5 points** [+5.5, +15.5] |
+| Effect of a wrong motif (hint_false − move_only) | −2.0 points [−7.0, +3.0], inconclusive |
+| Recognises the motif but misses the move | 15.8% of puzzles |
+
+What follows from it:
+
+- **"It understands, it doesn't calculate" does not hold as stated.** The model recognises the
+  motif better than chance, but not by much; and being told the correct one is worth 10 points on
+  the move. Knowing *where to look* is part of the problem, not just calculation.
+- The effect does not come from hanging pieces, where the hint nearly gives the move away:
+  excluding them it stays at +10.8 points.
+- The gain concentrates on geometric motifs (double check +30, skewer +18, pin +15 points; 40
+  puzzles each, so only indicative) and is almost nil on fork and sacrifice, which the model
+  already names often.
+- **Limits.** We measure answers, not the process: the result says nothing about *how* the model
+  reasons. One model, one `effort` level.
+
+**What it means for the tutor.** The design does not change: on its own the model finds the move
+in just over one puzzle in three, so the line stays the engine's job. The rationale does change:
+it is not that the model "already understands" and only needs keeping away from calculation;
+the motif of the position should come from the engine too, not be left to the model.
+
+All numbers, the per-theme breakdown, the cost and the run log are in the
+[run notes](docs/designs/rq3-run-notes.md); the pilot's in
+[`rq3-pilot-notes.md`](docs/designs/rq3-pilot-notes.md) (both in Italian).
+
+## Next steps
+
+1. **Cross-model comparison on RQ3.** Same 400 puzzles and four arms on models of different
+   capability and with different `effort` levels, to see whether motif recognition and the hint
+   effect change with the model. To be preregistered as a separate question, with its own budget.
+2. **RQ1/RQ2 run** on the 4 representations, after a 200-puzzle pilot (~$1). The old ~$100
+   estimate assumed 2,500 output tokens per answer; with the ~950 measured in RQ3 it comes down
+   to about $40.
+3. **Preregistered RQ3 figure** in `plots.py`: bars for the three move arms with the `random`
+   floor, and `theme_only` next to it with its own floor.
 
 ## The tutor
 
@@ -129,7 +192,7 @@ brew install stockfish            # macOS
 python scripts/get_stockfish.py   # Windows: downloads the right build for your CPU into bin/
 # or: export STOCKFISH_PATH=/path/to/binary
 
-pytest -q                         # 55 tests, ~5 s
+pytest -q                         # 70 tests, ~15 s
 ```
 
 A dry run, with no downloads and no API calls:
@@ -168,7 +231,7 @@ cache the benchmark reads.
 ```bash
 export ANTHROPIC_API_KEY=...
 
-# pilot: 200 puzzles, one representation (~$2.5 estimated with Sonnet 5.5)
+# pilot: 200 puzzles, one representation (~$1 with Sonnet 5.5)
 python scripts/llm_batch.py submit --puzzles data/sample.csv --limit 200 \
     --representations piece_list --dry-run     # counts requests and estimates cost
 python scripts/llm_batch.py submit --puzzles data/sample.csv --limit 200 --representations piece_list
@@ -176,7 +239,7 @@ python scripts/llm_batch.py collect --wait
 python scripts/run_benchmark.py --puzzles data/sample.csv --limit 200 --baselines \
     --representations piece_list --out results/pilot.csv
 
-# full: 2,006 puzzles × 4 representations (~$100 estimated with Sonnet 5.5)
+# full: 2,006 puzzles × 4 representations (~$40 with Sonnet 5.5)
 python scripts/llm_batch.py submit --puzzles data/sample.csv \
     --representations fen ascii piece_list piece_list_moves
 python scripts/llm_batch.py collect --wait
@@ -185,17 +248,34 @@ python scripts/run_benchmark.py --puzzles data/sample.csv --baselines \
 ```
 
 Model, `--effort`, `--max-tokens` and representations must match between the two scripts: they
-are part of the cache key.
+are part of the cache key. Cost estimates should use `--est-output-tokens 950`, the measured
+average. `submit` refuses to start if a batch with the same model is sent but not yet collected:
+its answers are not in the cache yet and would be paid twice. Run `collect --wait` first, or pass
+`--force`.
 
-**4. Plots and key numbers:**
+**4. RQ3 four-arm experiment** (~$9 the main run, ~$1 the pilot):
+
+```bash
+python scripts/rq3.py sample --puzzles data/sample.csv      # 400 main + 40 pilot, in results/rq3/
+python scripts/rq3.py submit --set main --dry-run           # count and estimate
+python scripts/rq3.py submit --set main
+python scripts/llm_batch.py collect --wait
+python scripts/rq3.py run --set main                        # cache only, judged by Stockfish
+python scripts/rq3.py analyse --set main                    # preregistered sentences -> results/rq3/main_summary.md
+```
+
+`run` never calls the API: if a single answer is missing from the cache it stops.
+
+**5. Plots and key numbers:**
 
 ```bash
 python scripts/plots.py --results results/baselines.csv results/llm.csv
 ```
 
-Writes the RQ1, RQ2 and RQ3 plots, the theme heatmap, the centipawn-loss distribution and
-`summary.md` (the three success-criteria sentences, with the numbers filled in) to
-`results/figures/`.
+Writes the RQ1 and RQ2 plots, the theme heatmap, the centipawn-loss distribution and
+`summary.md` (the success-criteria sentences, with the numbers filled in) to
+`results/figures/`. RQ3 has its own report (`rq3.py analyse`); the preregistered four-arm figure
+is not in `plots.py` yet.
 
 <details>
 <summary><b>Looking at the individual cases behind the tables</b></summary>
@@ -274,16 +354,19 @@ src/chesstutor/
   metrics.py          aggregation with Wilson intervals
   analysis.py         PGN → mistakes → profile → personalised puzzles
   report.py           tutor HTML report
+  rq3.py              RQ3: sample, arms, false motif, scoring, preregistered analysis
 scripts/
   get_stockfish.py    downloads Stockfish into bin/ (Windows)
   download_puzzles.py downloads the Lichess DB and samples it
   run_benchmark.py    the benchmark, with a final report
   llm_batch.py        fills the LLM cache via the Batch API
+  rq3.py              RQ3: sample → submit → run → analyse
   plots.py            RQ1/RQ2/RQ3 plots and key numbers
   inspect_results.py  the individual cases behind the tables
   tutor.py            Lichess games → HTML report
 tests/                pytest suite + verified fixture puzzles
 results/figures/      baseline plots and key numbers
+docs/designs/         RQ3 design, preregistration and run notes
 PLAN.md               work plan and success criteria
 ```
 
