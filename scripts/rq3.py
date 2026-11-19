@@ -86,12 +86,14 @@ def cmd_submit(args) -> None:
                                               load_cache(args.cache))
     cost = llm_batch.estimate_cost(requests, args.model, args.est_output_tokens)
     print(f"{len(prompts)} prompt pianificati, {len(requests)} non ancora in cache")
+    llm_batch.warn_uncollected(completer_cache_id(args.model, args.max_tokens, effort))
     if cost is not None:
         print(f"Costo stimato col batch: ~${cost:.2f} "
               f"(ipotesi {args.est_output_tokens} token di output per risposta)")
     if args.dry_run or not requests:
         return
-    llm_batch.submit_batch(requests, completer_cache_id(args.model, args.max_tokens, effort), args.cache)
+    llm_batch.submit_batch(requests, completer_cache_id(args.model, args.max_tokens, effort), args.cache,
+                           force=args.force)
 
 
 def cmd_run(args) -> None:
@@ -185,6 +187,24 @@ def control_rates(df) -> dict | None:
             "move_rate": float(move["solved"].mean()) if len(move) else 0.0}
 
 
+PREREG = ROOT / "docs" / "designs" / "rq3-preregistration.md"
+
+
+def prereg_commit() -> str | None:
+    """Ultimo commit della preregistrazione; None se git manca o il file ha modifiche non committate."""
+    import subprocess
+
+    def git(*cmd):
+        return subprocess.run(["git", *cmd], cwd=ROOT, capture_output=True, text=True)
+
+    try:
+        if git("diff", "--quiet", "HEAD", "--", str(PREREG)).returncode != 0:
+            return None
+        return git("log", "-1", "--format=%h", "--", str(PREREG)).stdout.strip() or None
+    except OSError:
+        return None
+
+
 def cmd_analyse(args) -> None:
     from chesstutor.metrics import load_results
 
@@ -195,7 +215,10 @@ def cmd_analyse(args) -> None:
     control_path = args.dir / f"{args.set}_control_{CONTROL_REP}.csv"
     control = control_rates(load_results(control_path)) if control_path.exists() else None
     text = render(report, control, args.set)
-    out = args.dir / f"{args.set}_summary.md"
+    frozen = prereg_commit()
+    if frozen:
+        text += f"\nPreregistrazione congelata al commit `{frozen}` (`{PREREG.relative_to(ROOT).as_posix()}`).\n"
+    out =args.dir / f"{args.set}_summary.md"
     out.write_text(text, encoding="utf-8")
     print(text)
     print(f"Scritto {out}")
@@ -223,8 +246,11 @@ def main() -> None:
 
     submit = sub.add_parser("submit", help="invia in batch i prompt non ancora in cache")
     model_args(submit)
-    submit.add_argument("--est-output-tokens", type=int, default=2500)
+    submit.add_argument("--est-output-tokens", type=int, default=950,
+                        help="token di output stimati per risposta (pilota: media 940)")
     submit.add_argument("--dry-run", action="store_true", help="conta e stima, non invia")
+    submit.add_argument("--force", action="store_true",
+                        help="invia anche se un batch dello stesso namespace non è ancora raccolto")
     submit.set_defaults(func=cmd_submit)
 
     run = sub.add_parser("run", help="esegue i bracci leggendo solo dalla cache")

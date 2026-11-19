@@ -125,16 +125,45 @@ def cmd_submit(args) -> None:
     cost = estimate_cost(requests, args.model, args.est_output_tokens)
     print(f"{len(puzzles)} puzzle x {len(args.representations)} rappresentazioni: "
           f"{len(requests)} richieste non ancora in cache")
+    warn_uncollected(completer_cache_id(args.model, args.max_tokens, effort))
     if cost is not None:
         print(f"Costo stimato col batch: ~${cost:.2f} "
               f"(ipotesi {args.est_output_tokens} token di output per risposta, ragionamento incluso)")
     if args.dry_run or not requests:
         return
-    submit_batch(requests, completer_cache_id(args.model, args.max_tokens, effort), args.cache)
+    submit_batch(requests, completer_cache_id(args.model, args.max_tokens, effort), args.cache,
+                 force=args.force)
 
 
-def submit_batch(requests: list[dict], namespace: str, cache: str) -> str:
-    """Invia un batch e lo registra in STATE, così `collect` lo trova."""
+def uncollected(entries: list[dict], namespace: str) -> list[str]:
+    """Batch inviati e non ancora raccolti con lo stesso namespace.
+
+    Le loro risposte non sono ancora in cache, quindi un nuovo submit le
+    conterebbe come mancanti e le pagherebbe due volte (successo il
+    2026-11-19 sul principale di RQ3: $8,93 in doppio).
+    """
+    return [e["id"] for e in entries if not e["collected"] and e["namespace"] == namespace]
+
+
+def warn_uncollected(namespace: str) -> None:
+    pending = uncollected(read_state(), namespace)
+    if pending:
+        print(f"ATTENZIONE: {len(pending)} batch non ancora raccolti ({', '.join(pending)}): "
+              "le loro risposte non sono contate come in cache. Prima `collect --wait`.")
+
+
+def submit_batch(requests: list[dict], namespace: str, cache: str, force: bool = False) -> str:
+    """Invia un batch e lo registra in STATE, così `collect` lo trova.
+
+    Si rifiuta se c'è un batch dello stesso namespace non ancora raccolto,
+    a meno di force=True.
+    """
+    pending = uncollected(read_state(), namespace)
+    if pending and not force:
+        sys.exit(f"Batch non ancora raccolti con lo stesso modello/effort/max-tokens: "
+                 f"{', '.join(pending)}. Lancia prima `python scripts/llm_batch.py collect --wait` "
+                 "e ripeti il submit, che invierà solo ciò che manca davvero. "
+                 "Per inviare comunque: --force. Nessuna richiesta inviata.")
     import anthropic
 
     batch = anthropic.Anthropic().messages.batches.create(requests=requests)
@@ -189,6 +218,8 @@ def main() -> None:
     submit.add_argument("--cache", default="results/llm_cache.jsonl")
     submit.add_argument("--est-output-tokens", type=int, default=2500)
     submit.add_argument("--dry-run", action="store_true", help="conta e stima, non invia")
+    submit.add_argument("--force", action="store_true",
+                        help="invia anche se un batch dello stesso namespace non è ancora raccolto")
     submit.set_defaults(func=cmd_submit)
 
     collect = sub.add_parser("collect", help="scarica i risultati dei batch inviati")

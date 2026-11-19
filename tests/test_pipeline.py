@@ -458,6 +458,22 @@ def test_requests_for_prompts_dedups_and_skips_cached():
     assert reqs[0]["custom_id"] == cache_key(namespace, "a")
 
 
+def test_submit_refuses_while_same_namespace_batch_is_uncollected(tmp_path, monkeypatch):
+    """Un batch inviato e non raccolto non è in cache: un secondo submit lo pagherebbe due volte."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import llm_batch
+
+    monkeypatch.setattr(llm_batch, "STATE", tmp_path / "batches.jsonl")
+    llm_batch.write_state([
+        {"id": "b_old", "namespace": "ns", "cache": "c", "requests": 1, "collected": True},
+        {"id": "b_other", "namespace": "altro", "cache": "c", "requests": 1, "collected": False},
+        {"id": "b_live", "namespace": "ns", "cache": "c", "requests": 1, "collected": False},
+    ])
+    assert llm_batch.uncollected(llm_batch.read_state(), "ns") == ["b_live"]
+    with pytest.raises(SystemExit, match="b_live"):
+        llm_batch.submit_batch([{"custom_id": "x"}], "ns", "c")
+
+
 # --- RQ3 a quattro bracci ---------------------------------------------------
 
 GOLDEN_FALSE_THEME = "deflection"  # rq3.false_theme(puzzle 'golden', tema fork, seed 0)
